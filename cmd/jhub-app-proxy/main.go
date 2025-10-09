@@ -273,7 +273,10 @@ func run(cfg *Config) error {
 	// Create intelligent proxy that shows logs until app is ready
 	// Proxy forwards to subprocess on internal port
 	subprocessURL := fmt.Sprintf("http://127.0.0.1:%d", subprocessPort)
-	proxyHandler := proxy.NewHandler(mgr, subprocessURL, mux, log)
+	proxyHandler, err := proxy.NewHandler(mgr, subprocessURL, mux, cfg.AuthType, log)
+	if err != nil {
+		return fmt.Errorf("failed to create proxy handler: %w", err)
+	}
 
 	// Handle JupyterHub service prefix (e.g., /user/admin/servername)
 	// This is the industry-standard way to handle apps running under a subpath

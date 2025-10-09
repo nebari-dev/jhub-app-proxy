@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/nebari-dev/jhub-app-proxy/pkg/auth"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/logger"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/process"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/ui"
@@ -15,16 +16,27 @@ import (
 
 // Handler is an intelligent proxy that shows logs until the app is ready
 type Handler struct {
-	manager       *process.ManagerWithLogs
-	upstreamURL   string
-	reverseProxy  *httputil.ReverseProxy
-	logger        *logger.Logger
-	logsHandler   http.Handler
+	manager      *process.ManagerWithLogs
+	upstreamURL  string
+	reverseProxy *httputil.ReverseProxy
+	logger       *logger.Logger
+	logsHandler  http.Handler
+	authType     string
+	oauthMW      *auth.OAuthMiddleware
 }
 
 // NewHandler creates a new proxy handler
-func NewHandler(manager *process.ManagerWithLogs, upstreamURL string, logsHandler http.Handler, log *logger.Logger) *Handler {
+func NewHandler(manager *process.ManagerWithLogs, upstreamURL string, logsHandler http.Handler, authType string, log *logger.Logger) (*Handler, error) {
 	target, _ := url.Parse(upstreamURL)
+
+	var oauthMW *auth.OAuthMiddleware
+	if authType == "oauth" {
+		var err error
+		oauthMW, err = auth.NewOAuthMiddleware(log)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OAuth middleware: %w", err)
+		}
+	}
 
 	return &Handler{
 		manager:      manager,
@@ -32,12 +44,25 @@ func NewHandler(manager *process.ManagerWithLogs, upstreamURL string, logsHandle
 		reverseProxy: httputil.NewSingleHostReverseProxy(target),
 		logger:       log,
 		logsHandler:  logsHandler,
-	}
+		authType:     authType,
+		oauthMW:      oauthMW,
+	}, nil
 }
 
 // ServeHTTP implements http.Handler
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Always serve API endpoints
+	handler := http.HandlerFunc(h.serve)
+
+	// Wrap with OAuth if enabled
+	if h.oauthMW != nil {
+		h.oauthMW.Wrap(handler).ServeHTTP(w, r)
+	} else {
+		handler.ServeHTTP(w, r)
+	}
+}
+
+func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
+	// Serve API endpoints
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		h.logsHandler.ServeHTTP(w, r)
 		return
