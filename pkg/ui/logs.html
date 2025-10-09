@@ -107,12 +107,49 @@
             display: flex;
             align-items: center;
             gap: 0.5rem;
+            justify-content: space-between;
+        }
+
+        .section-header-left {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }
 
         .section-header svg {
             width: 1rem;
             height: 1rem;
             color: #64748b;
+        }
+
+        .copy-button {
+            background: #334155;
+            border: 1px solid #475569;
+            color: #94a3b8;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            transition: all 0.2s;
+        }
+
+        .copy-button:hover {
+            background: #475569;
+            color: #cbd5e1;
+        }
+
+        .copy-button svg {
+            width: 0.875rem;
+            height: 0.875rem;
+        }
+
+        .copy-button.copied {
+            background: #166534;
+            border-color: #16a34a;
+            color: #86efac;
         }
 
         .section-content {
@@ -232,11 +269,20 @@
 
         <div class="section">
             <div class="section-header">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="4 17 10 11 4 5"></polyline>
-                    <line x1="12" y1="19" x2="20" y2="19"></line>
-                </svg>
-                Running Command
+                <div class="section-header-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="4 17 10 11 4 5"></polyline>
+                        <line x1="12" y1="19" x2="20" y2="19"></line>
+                    </svg>
+                    Running Command
+                </div>
+                <button class="copy-button" id="copyCommand" title="Copy command">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                    Copy
+                </button>
             </div>
             <div class="section-content">
                 <div class="command">
@@ -248,11 +294,20 @@
 
         <div class="section">
             <div class="section-header">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="4 17 10 11 4 5"></polyline>
-                    <line x1="12" y1="19" x2="20" y2="19"></line>
-                </svg>
-                Logs
+                <div class="section-header-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="4 17 10 11 4 5"></polyline>
+                        <line x1="12" y1="19" x2="20" y2="19"></line>
+                    </svg>
+                    Logs
+                </div>
+                <button class="copy-button" id="copyLogs" title="Copy all logs">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                    Copy
+                </button>
             </div>
             <div class="section-content logs-content" id="logs">
                 <div class="log-line log-placeholder">Waiting for output...</div>
@@ -391,6 +446,41 @@
                 console.error('Error fetching logs:', err);
             }
         }
+
+        // Copy functionality
+        function copyToClipboard(text, button) {
+            navigator.clipboard.writeText(text).then(() => {
+                // Show success feedback
+                const originalText = button.innerHTML;
+                button.classList.add('copied');
+                button.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    Copied!
+                `;
+
+                // Reset after 2 seconds
+                setTimeout(() => {
+                    button.classList.remove('copied');
+                    button.innerHTML = originalText;
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+            });
+        }
+
+        document.getElementById('copyCommand').addEventListener('click', function() {
+            const command = commandText.textContent;
+            copyToClipboard(command, this);
+        });
+
+        document.getElementById('copyLogs').addEventListener('click', function() {
+            const logLines = Array.from(logsContainer.querySelectorAll('.log-line'))
+                .map(line => line.textContent)
+                .join('\n');
+            copyToClipboard(logLines, this);
+        });
 
         // Initial calls
         loadLogo();
