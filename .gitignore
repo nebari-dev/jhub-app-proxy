@@ -1,5 +1,5 @@
 # Binaries
-jhub-app-proxy
+/jhub-app-proxy
 *.exe
 *.dll
 *.so
