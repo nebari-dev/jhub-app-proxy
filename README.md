@@ -12,6 +12,32 @@ A lightweight app proxy for JupyterHub applications that displays real-time star
 
 ## Installation
 
+### Quick Install (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nebari-dev/jhub-app-proxy/main/install.sh | bash
+```
+
+Or with specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nebari-dev/jhub-app-proxy/main/install.sh | bash -s -- -v v0.1
+```
+
+### Manual Install
+
+Download and run the install script:
+
+```bash
+wget https://raw.githubusercontent.com/nebari-dev/jhub-app-proxy/main/install.sh
+chmod +x install.sh
+./install.sh              # Install latest version
+./install.sh -v v0.1      # Install specific version
+./install.sh -d /usr/local/bin  # Custom install directory
+```
+
+### Alternative Methods
+
 ```bash
 go install github.com/nebari-dev/jhub-app-proxy/cmd/jhub-app-proxy@latest
 ```
