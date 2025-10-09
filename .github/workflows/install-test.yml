@@ -1,0 +1,40 @@
+name: Install Script Test
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'install.sh'
+      - '.github/workflows/install-test.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'install.sh'
+      - '.github/workflows/install-test.yml'
+
+jobs:
+  test-install:
+    name: Test install.sh
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Test install script with latest version
+        run: |
+          chmod +x install.sh
+          ./install.sh -v v0.1
+
+      - name: Verify installation
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          jhub-app-proxy --version
+
+      - name: Test help command
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          jhub-app-proxy --help
