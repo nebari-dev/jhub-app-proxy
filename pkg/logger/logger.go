@@ -1,14 +1,15 @@
-// Package logger provides production-grade structured logging with zero allocation
-// and comprehensive error context tracking.
+// Package logger provides production-grade structured logging using Go's standard library
 package logger
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"time"
 
-	"github.com/rs/zerolog"
+	"github.com/lmittmann/tint"
 )
 
 // Level represents log levels
@@ -49,17 +50,15 @@ func DefaultConfig() Config {
 	}
 }
 
-// Logger wraps zerolog with domain-specific logging methods
-// Implements zero-allocation logging for production performance
+// Logger wraps slog.Logger with domain-specific logging methods
 type Logger struct {
-	logger zerolog.Logger
+	logger *slog.Logger
 }
 
 // New creates a new production-ready structured logger
 func New(cfg Config) *Logger {
-	// Parse and set log level
+	// Parse log level
 	level := parseLevel(cfg.Level)
-	zerolog.SetGlobalLevel(level)
 
 	// Configure output writer
 	output := cfg.Output
@@ -67,318 +66,234 @@ func New(cfg Config) *Logger {
 		output = os.Stdout
 	}
 
-	// Apply pretty formatting if requested (development mode)
-	// Format: [info    2025-10-09 12:13:04.565 JHub App Proxy] message
+	var handler slog.Handler
+
+	// Create handler based on format
 	if cfg.Format == FormatPretty {
+		// Use tint for colored output (always enabled, works even when piped)
 		timeFormat := cfg.TimeFormat
 		if timeFormat == "" {
 			timeFormat = "2006-01-02 15:04:05.000"
 		}
-		output = zerolog.ConsoleWriter{
-			Out:        output,
+
+		handler = tint.NewHandler(output, &tint.Options{
+			Level:      level,
 			TimeFormat: timeFormat,
-			NoColor:    false,
-			FormatLevel: func(i interface{}) string {
-				// Pad level to 7 chars (longest is "warning")
-				level := fmt.Sprintf("%-7s", i)
-				return fmt.Sprintf("[%s ", level)
-			},
-			FormatTimestamp: func(i interface{}) string {
-				// Parse the timestamp and reformat it
-				t, err := time.Parse(time.RFC3339, fmt.Sprintf("%s", i))
-				if err != nil {
-					// If parsing fails, use as-is
-					return fmt.Sprintf("%s JHub App Proxy]", i)
-				}
-				// Format using our custom format
-				formatted := t.Format(timeFormat)
-				return fmt.Sprintf("%s JHub App Proxy]", formatted)
-			},
-			FormatMessage: func(i interface{}) string {
-				return fmt.Sprintf(" %s", i)
-			},
-			FormatFieldName: func(i interface{}) string {
-				return fmt.Sprintf(" %s=", i)
-			},
-			FormatFieldValue: func(i interface{}) string {
-				return fmt.Sprintf("%s", i)
-			},
-			PartsOrder: []string{
-				zerolog.LevelFieldName,
-				zerolog.TimestampFieldName,
-				zerolog.MessageFieldName,
-			},
+			NoColor:    false, // Always use colors
+			AddSource:  cfg.ShowCaller,
+		})
+	} else {
+		// JSON format for production
+		opts := &slog.HandlerOptions{
+			Level: level,
 		}
+		if cfg.ShowCaller {
+			opts.AddSource = true
+		}
+		handler = slog.NewJSONHandler(output, opts)
 	}
 
-	// Build logger with context
-	logger := zerolog.New(output).
-		With().
-		Timestamp().
-		Str("service", "jhub-app-proxy")
-
-	if cfg.ShowCaller {
-		logger = logger.Caller()
-	}
+	logger := slog.New(handler).With("service", "jhub-app-proxy")
 
 	return &Logger{
-		logger: logger.Logger(),
+		logger: logger,
 	}
 }
 
 // WithComponent creates a child logger with component context for modularity
 func (l *Logger) WithComponent(component string) *Logger {
 	return &Logger{
-		logger: l.logger.With().Str("component", component).Logger(),
+		logger: l.logger.With("component", component),
 	}
 }
 
 // WithProcess creates a child logger with process context
 func (l *Logger) WithProcess(pid int, command string) *Logger {
 	return &Logger{
-		logger: l.logger.With().
-			Int("pid", pid).
-			Str("command", command).
-			Logger(),
+		logger: l.logger.With("pid", pid, "command", command),
 	}
 }
 
 // WithFramework creates a child logger with framework context
 func (l *Logger) WithFramework(framework string) *Logger {
 	return &Logger{
-		logger: l.logger.With().Str("framework", framework).Logger(),
+		logger: l.logger.With("framework", framework),
 	}
 }
 
 // WithUser creates a child logger with user context for request tracing
 func (l *Logger) WithUser(username string) *Logger {
 	return &Logger{
-		logger: l.logger.With().Str("user", username).Logger(),
+		logger: l.logger.With("user", username),
 	}
 }
 
 // WithFields creates a child logger with arbitrary context fields
 func (l *Logger) WithFields(fields map[string]interface{}) *Logger {
-	ctx := l.logger.With()
+	args := make([]any, 0, len(fields)*2)
 	for k, v := range fields {
-		ctx = ctx.Interface(k, v)
+		args = append(args, k, v)
 	}
 	return &Logger{
-		logger: ctx.Logger(),
+		logger: l.logger.With(args...),
 	}
 }
 
 // Debug logs debug level message with optional key-value pairs
 func (l *Logger) Debug(msg string, keysAndValues ...interface{}) {
-	l.logWithFields(l.logger.Debug(), msg, keysAndValues...)
+	l.logWithFields(slog.LevelDebug, msg, keysAndValues...)
 }
 
 // Info logs info level message with optional key-value pairs
 func (l *Logger) Info(msg string, keysAndValues ...interface{}) {
-	l.logWithFields(l.logger.Info(), msg, keysAndValues...)
+	l.logWithFields(slog.LevelInfo, msg, keysAndValues...)
 }
 
 // Warn logs warning level message with optional key-value pairs
 func (l *Logger) Warn(msg string, keysAndValues ...interface{}) {
-	l.logWithFields(l.logger.Warn(), msg, keysAndValues...)
+	l.logWithFields(slog.LevelWarn, msg, keysAndValues...)
 }
 
 // Error logs error level message with error and optional key-value pairs
 func (l *Logger) Error(msg string, err error, keysAndValues ...interface{}) {
-	event := l.logger.Error()
 	if err != nil {
-		event = event.Err(err).
-			Str("error_type", fmt.Sprintf("%T", err))
+		keysAndValues = append([]interface{}{"error", err.Error(), "error_type", fmt.Sprintf("%T", err)}, keysAndValues...)
 	}
-	l.logWithFields(event, msg, keysAndValues...)
+	l.logWithFields(slog.LevelError, msg, keysAndValues...)
 }
 
 // Fatal logs fatal level message with error and exits with code 1
 func (l *Logger) Fatal(msg string, err error, keysAndValues ...interface{}) {
-	event := l.logger.Fatal()
 	if err != nil {
-		event = event.Err(err).
-			Str("error_type", fmt.Sprintf("%T", err))
+		keysAndValues = append([]interface{}{"error", err.Error(), "error_type", fmt.Sprintf("%T", err)}, keysAndValues...)
 	}
-	l.logWithFields(event, msg, keysAndValues...)
+	l.logWithFields(slog.LevelError, msg, keysAndValues...)
+	os.Exit(1)
 }
 
 // ProcessOutput logs subprocess output with proper stream designation
-// This ensures all subprocess output is visible and trackable
 func (l *Logger) ProcessOutput(stream string, line string) {
-	l.logger.Info().
-		Str("stream", stream).
-		Str("output", line).
-		Msg("subprocess output")
+	l.logger.Info("subprocess output", "stream", stream, "output", line)
 }
 
 // ProcessFailed logs subprocess failure with comprehensive error context
-// Includes exit code, stderr, stdout for complete debugging visibility
 func (l *Logger) ProcessFailed(exitCode int, stderr, stdout string, err error) {
-	event := l.logger.Error().
-		Int("exit_code", exitCode).
-		Str("stderr", stderr).
-		Str("stdout", stdout)
-
+	args := []any{"exit_code", exitCode, "stderr", stderr, "stdout", stdout}
 	if err != nil {
-		event = event.Err(err)
+		args = append(args, "error", err.Error())
 	}
-
-	event.Msg("subprocess failed")
+	l.logger.Error("subprocess failed", args...)
 }
 
 // ProcessStarted logs process start with full command visibility
 func (l *Logger) ProcessStarted(pid int, command []string, env map[string]string) {
-	l.logger.Info().
-		Int("pid", pid).
-		Strs("command", command).
-		Interface("env", env).
-		Msg("process started")
+	l.logger.Info("process started", "pid", pid, "command", command, "env", env)
 }
 
 // ProcessExited logs process exit with duration and exit code
 func (l *Logger) ProcessExited(pid int, exitCode int, duration time.Duration) {
-	event := l.logger.Info().
-		Int("pid", pid).
-		Int("exit_code", exitCode).
-		Dur("duration", duration)
-
-	if exitCode == 0 {
-		event.Msg("process exited successfully")
-	} else {
-		event.Msg("process exited with error")
+	msg := "process exited successfully"
+	if exitCode != 0 {
+		msg = "process exited with error"
 	}
+	l.logger.Info(msg, "pid", pid, "exit_code", exitCode, "duration", duration)
 }
 
 // Progress logs progress updates for long-running operations
-// Useful for tracking multi-step initialization processes
 func (l *Logger) Progress(stage string, keysAndValues ...interface{}) {
-	event := l.logger.Info().Str("stage", stage)
-	l.logWithFields(event, "progress", keysAndValues...)
+	keysAndValues = append([]interface{}{"stage", stage}, keysAndValues...)
+	l.logWithFields(slog.LevelInfo, "progress", keysAndValues...)
 }
 
 // Metric logs metrics for monitoring and observability
 func (l *Logger) Metric(name string, value interface{}, keysAndValues ...interface{}) {
-	event := l.logger.Info().
-		Str("metric", name).
-		Interface("value", value)
-	l.logWithFields(event, "metric recorded", keysAndValues...)
+	keysAndValues = append([]interface{}{"metric", name, "value", value}, keysAndValues...)
+	l.logWithFields(slog.LevelInfo, "metric recorded", keysAndValues...)
 }
 
 // HealthCheck logs health check attempts with comprehensive context
-// Shows attempt number, URL, success status, latency for debugging startup issues
 func (l *Logger) HealthCheck(attempt, maxAttempts int, url string, success bool, latency time.Duration, err error) {
-	event := l.logger.Info().
-		Int("attempt", attempt).
-		Int("max_attempts", maxAttempts).
-		Str("url", url).
-		Bool("success", success).
-		Dur("latency", latency)
-
+	msg := "health check succeeded"
+	if !success {
+		msg = "health check failed"
+	}
+	args := []any{"attempt", attempt, "max_attempts", maxAttempts, "url", url, "success", success, "latency", latency}
 	if err != nil {
-		event = event.Err(err)
+		args = append(args, "error", err.Error())
 	}
-
-	if success {
-		event.Msg("health check succeeded")
-	} else {
-		event.Msg("health check failed")
-	}
+	l.logger.Info(msg, args...)
 }
 
 // StartupBanner logs a concise startup message with configuration
 func (l *Logger) StartupBanner(version string, config map[string]interface{}) {
-	l.logger.Info().
-		Str("version", version).
-		Interface("config", config).
-		Msg("jhub-app-proxy starting")
+	l.logger.Info("jhub-app-proxy starting", "version", version, "config", config)
 }
 
 // ShutdownBanner logs a clear shutdown message
 func (l *Logger) ShutdownBanner(reason string) {
-	l.logger.Info().Msg("==================================================")
-	l.logger.Info().
-		Str("reason", reason).
-		Msg("Shutting down JHub Apps Proxy")
-	l.logger.Info().Msg("==================================================")
+	l.logger.Info("==================================================")
+	l.logger.Info("Shutting down JHub Apps Proxy", "reason", reason)
+	l.logger.Info("==================================================")
 }
 
 // HubAPICall logs JupyterHub API calls for debugging auth and activity reporting
 func (l *Logger) HubAPICall(method, endpoint string, statusCode int, duration time.Duration, err error) {
-	event := l.logger.Info().
-		Str("method", method).
-		Str("endpoint", endpoint).
-		Int("status_code", statusCode).
-		Dur("duration", duration)
-
+	msg := "Hub API call succeeded"
+	args := []any{"method", method, "endpoint", endpoint, "status_code", statusCode, "duration", duration}
 	if err != nil {
-		event.Err(err).Msg("Hub API call failed")
-	} else {
-		event.Msg("Hub API call succeeded")
+		msg = "Hub API call failed"
+		args = append(args, "error", err.Error())
 	}
+	l.logger.Info(msg, args...)
 }
 
 // GitOperation logs git clone/pull operations with progress visibility
 func (l *Logger) GitOperation(operation, repo, branch, dest string, err error) {
-	event := l.logger.Info().
-		Str("operation", operation).
-		Str("repo", repo).
-		Str("branch", branch).
-		Str("destination", dest)
-
+	msg := "git operation succeeded"
+	args := []any{"operation", operation, "repo", repo, "branch", branch, "destination", dest}
 	if err != nil {
-		event.Err(err).Msg("git operation failed")
-	} else {
-		event.Msg("git operation succeeded")
+		msg = "git operation failed"
+		args = append(args, "error", err.Error())
 	}
+	l.logger.Info(msg, args...)
 }
 
 // CondaActivation logs conda environment activation attempts
 func (l *Logger) CondaActivation(envName, envPath string, err error) {
-	event := l.logger.Info().
-		Str("env_name", envName).
-		Str("env_path", envPath)
-
+	msg := "conda environment activated"
+	args := []any{"env_name", envName, "env_path", envPath}
 	if err != nil {
-		event.Err(err).Msg("conda activation failed")
-	} else {
-		event.Msg("conda environment activated")
+		msg = "conda activation failed"
+		args = append(args, "error", err.Error())
 	}
+	l.logger.Info(msg, args...)
 }
 
 // logWithFields is a helper to add key-value pairs to log events
-// Validates even number of arguments for proper key-value pairing
-func (l *Logger) logWithFields(event *zerolog.Event, msg string, keysAndValues ...interface{}) {
+func (l *Logger) logWithFields(level slog.Level, msg string, keysAndValues ...interface{}) {
 	if len(keysAndValues)%2 != 0 {
-		l.logger.Warn().
-			Int("args_count", len(keysAndValues)).
-			Msg("odd number of key-value pairs provided to logger")
+		l.logger.Warn("odd number of key-value pairs provided to logger", "args_count", len(keysAndValues))
 		keysAndValues = append(keysAndValues, "<missing_value>")
 	}
 
-	for i := 0; i < len(keysAndValues); i += 2 {
-		key := fmt.Sprintf("%v", keysAndValues[i])
-		event = event.Interface(key, keysAndValues[i+1])
-	}
-
-	event.Msg(msg)
+	l.logger.Log(context.Background(), level, msg, keysAndValues...)
 }
 
-// GetZerolog returns the underlying zerolog logger for advanced use cases
-func (l *Logger) GetZerolog() zerolog.Logger {
+// GetSlog returns the underlying slog.Logger for advanced use cases
+func (l *Logger) GetSlog() *slog.Logger {
 	return l.logger
 }
 
-// parseLevel converts string level to zerolog.Level
-func parseLevel(level Level) zerolog.Level {
+// parseLevel converts string level to slog.Level
+func parseLevel(level Level) slog.Level {
 	switch level {
 	case LevelDebug:
-		return zerolog.DebugLevel
+		return slog.LevelDebug
 	case LevelWarn:
-		return zerolog.WarnLevel
+		return slog.LevelWarn
 	case LevelError:
-		return zerolog.ErrorLevel
+		return slog.LevelError
 	default:
-		return zerolog.InfoLevel
+		return slog.LevelInfo
 	}
 }
