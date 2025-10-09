@@ -152,6 +152,45 @@
             color: #86efac;
         }
 
+        .auto-redirect-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            color: #64748b;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 2.5rem;
+            height: 1.25rem;
+            background: #334155;
+            border-radius: 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+            border: 1px solid #475569;
+        }
+
+        .toggle-switch.active {
+            background: #3b82f6;
+            border-color: #60a5fa;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            top: 0.125rem;
+            left: 0.125rem;
+            width: 0.875rem;
+            height: 0.875rem;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform 0.2s;
+        }
+
+        .toggle-switch.active .toggle-slider {
+            transform: translateX(1.25rem);
+        }
+
         .section-content {
             padding: 0.75rem 1rem;
             background: #0f172a;
@@ -260,7 +299,7 @@
         <div class="header">
             <img id="logo" alt="Nebari Logo" class="logo">
             <div>
-                <h1 class="title" id="title">Deploying your application (will redirect automatically)</h1>
+                <h1 class="title" id="title">Deploying your application</h1>
             </div>
             <div class="progress-container" id="progressContainer">
                 <div class="progress-indicator"></div>
@@ -301,13 +340,21 @@
                     </svg>
                     Logs
                 </div>
-                <button class="copy-button" id="copyLogs" title="Copy all logs">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                    </svg>
-                    Copy
-                </button>
+                <div style="display: flex; align-items: center; gap: 1.5rem;">
+                    <div class="auto-redirect-toggle">
+                        <span>Auto-scroll</span>
+                        <div class="toggle-switch active" id="autoScrollToggle">
+                            <div class="toggle-slider"></div>
+                        </div>
+                    </div>
+                    <button class="copy-button" id="copyLogs" title="Copy all logs">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                        Copy
+                    </button>
+                </div>
             </div>
             <div class="section-content logs-content" id="logs">
                 <div class="log-line log-placeholder">Waiting for output...</div>
@@ -331,9 +378,25 @@
         const commandText = document.getElementById('commandText');
         const versionText = document.getElementById('versionText');
         const logo = document.getElementById('logo');
+        const autoScrollToggle = document.getElementById('autoScrollToggle');
 
         let isReady = false;
         let lastLogCount = 0;
+
+        // Auto-scroll state (default: true)
+        let autoScrollEnabled = localStorage.getItem('autoScroll') !== 'false';
+
+        // Initialize toggle state
+        if (!autoScrollEnabled) {
+            autoScrollToggle.classList.remove('active');
+        }
+
+        // Toggle handler
+        autoScrollToggle.addEventListener('click', function() {
+            autoScrollEnabled = !autoScrollEnabled;
+            this.classList.toggle('active');
+            localStorage.setItem('autoScroll', autoScrollEnabled);
+        });
 
         // Load logo
         async function loadLogo() {
@@ -349,7 +412,9 @@
         }
 
         function scrollToBottom() {
-            logsContainer.scrollTop = logsContainer.scrollHeight;
+            if (autoScrollEnabled) {
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
         }
 
         function addLog(stream, line) {
@@ -385,9 +450,8 @@
 
                     if (state === 'running' && !isReady) {
                         isReady = true;
-                        title.innerHTML = 'Application ready, redirecting...';
                         progressContainer.classList.add('hidden');
-
+                        title.innerHTML = 'Application ready, redirecting...';
                         // Reload the page to show the running application
                         window.location.reload();
                     } else if (state === 'failed') {
