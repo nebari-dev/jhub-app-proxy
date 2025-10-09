@@ -68,22 +68,45 @@ func New(cfg Config) *Logger {
 	}
 
 	// Apply pretty formatting if requested (development mode)
+	// Format: [info    2025-10-09 12:13:04.565 JHub App Proxy] message
 	if cfg.Format == FormatPretty {
+		timeFormat := cfg.TimeFormat
+		if timeFormat == "" {
+			timeFormat = "2006-01-02 15:04:05.000"
+		}
 		output = zerolog.ConsoleWriter{
 			Out:        output,
-			TimeFormat: cfg.TimeFormat,
+			TimeFormat: timeFormat,
 			NoColor:    false,
 			FormatLevel: func(i interface{}) string {
-				return fmt.Sprintf("| %-6s|", i)
+				// Pad level to 7 chars (longest is "warning")
+				level := fmt.Sprintf("%-7s", i)
+				return fmt.Sprintf("[%s ", level)
+			},
+			FormatTimestamp: func(i interface{}) string {
+				// Parse the timestamp and reformat it
+				t, err := time.Parse(time.RFC3339, fmt.Sprintf("%s", i))
+				if err != nil {
+					// If parsing fails, use as-is
+					return fmt.Sprintf("%s JHub App Proxy]", i)
+				}
+				// Format using our custom format
+				formatted := t.Format(timeFormat)
+				return fmt.Sprintf("%s JHub App Proxy]", formatted)
 			},
 			FormatMessage: func(i interface{}) string {
-				return fmt.Sprintf("%s", i)
+				return fmt.Sprintf(" %s", i)
 			},
 			FormatFieldName: func(i interface{}) string {
-				return fmt.Sprintf("%s:", i)
+				return fmt.Sprintf(" %s=", i)
 			},
 			FormatFieldValue: func(i interface{}) string {
-				return fmt.Sprintf(" %s", i) // Added space before value
+				return fmt.Sprintf("%s", i)
+			},
+			PartsOrder: []string{
+				zerolog.LevelFieldName,
+				zerolog.TimestampFieldName,
+				zerolog.MessageFieldName,
 			},
 		}
 	}

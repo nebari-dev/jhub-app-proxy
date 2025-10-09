@@ -165,6 +165,7 @@ func run(cfg *Config) error {
 		Level:      logger.Level(cfg.LogLevel),
 		Format:     logger.Format(cfg.LogFormat),
 		ShowCaller: cfg.ShowCaller,
+		TimeFormat: "2006-01-02 15:04:05.000", // JupyterHub-style format with milliseconds
 	}
 	log := logger.New(logCfg)
 
@@ -334,18 +335,14 @@ func run(cfg *Config) error {
 				"pid", mgr.GetPID(),
 				"internal_port", subprocessPort)
 
-			// Print prominent URLs
+			// Log application URLs with separators
 			appURL := fmt.Sprintf("http://127.0.0.1:%d", proxyPort)
-
-			fmt.Println()
-			fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-			fmt.Printf("  🚀 Application started successfully!\n")
-			fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-			fmt.Printf("  📍 Application URL:  %s\n", appURL)
-			fmt.Printf("  📡 Logs API:         %s/api/logs\n", appURL)
-			fmt.Printf("  🔧 Process ID:       %d\n", mgr.GetPID())
-			fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-			fmt.Println()
+			log.Info("==================================================")
+			log.Info("application ready",
+				"app_url", appURL,
+				"logs_api", fmt.Sprintf("%s/api/logs", appURL),
+				"pid", mgr.GetPID())
+			log.Info("==================================================")
 
 			// Start JupyterHub activity reporter if in oauth mode
 			if cfg.AuthType == "oauth" {
@@ -356,15 +353,14 @@ func run(cfg *Config) error {
 		}
 	}()
 
-	// Print initial URLs
+	// Log proxy server startup with separators
 	proxyURL := fmt.Sprintf("http://127.0.0.1:%d", proxyPort)
-	fmt.Println()
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Printf("  📡 Proxy Server:     %s\n", proxyURL)
-	fmt.Printf("  📊 Logs & Status:    %s/api/logs\n", proxyURL)
-	fmt.Printf("  🔄 Starting app on internal port %d...\n", subprocessPort)
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Println()
+	log.Info("==================================================")
+	log.Info("proxy server ready",
+		"proxy_url", proxyURL,
+		"logs_api", fmt.Sprintf("%s/api/logs", proxyURL),
+		"internal_port", subprocessPort)
+	log.Info("==================================================")
 
 	// Wait for shutdown signal (context will be cancelled by signal handler)
 	<-ctx.Done()
