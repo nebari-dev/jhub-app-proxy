@@ -20,16 +20,22 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Functions
+timestamp() {
+    # Format: 2025-10-10 17:55:39.151 (matches jhub-app-proxy log format)
+    # Note: %3N works on Linux/GNU date, shows literal %3N on macOS
+    date '+%Y-%m-%d %H:%M:%S.%3N'
+}
+
 info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+    echo -e "$(timestamp) ${GREEN}INF${NC} $1"
 }
 
 warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    echo -e "$(timestamp) ${YELLOW}WRN${NC} $1"
 }
 
 error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "$(timestamp) ${RED}ERR${NC} $1"
     exit 1
 }
 
@@ -125,6 +131,8 @@ main() {
     local install_dir="${INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
 
     info "Installing jhub-app-proxy..."
+    info "Home directory: ${HOME}"
+    info "Install directory: ${install_dir}"
 
     # Detect system
     local os=$(detect_os)
@@ -153,7 +161,8 @@ main() {
     trap "rm -rf $tmp_dir" EXIT
 
     # Download and extract
-    if ! curl -sL "$download_url" -o "${tmp_dir}/${archive_name}"; then
+    # Use -# for progress meter (available in all curl versions, unlike --progress-bar)
+    if ! curl -L -# "$download_url" -o "${tmp_dir}/${archive_name}"; then
         error "Failed to download release"
     fi
 
@@ -168,8 +177,8 @@ main() {
     mv "${tmp_dir}/${BINARY_NAME}" "${install_dir}/${BINARY_NAME}"
     chmod +x "${install_dir}/${BINARY_NAME}"
 
-    # Verify installation
-    if ! "${install_dir}/${BINARY_NAME}" --version >/dev/null 2>&1; then
+    # Verify installation and show version
+    if ! "${install_dir}/${BINARY_NAME}" --version; then
         error "Installation failed: binary is not executable"
     fi
 
