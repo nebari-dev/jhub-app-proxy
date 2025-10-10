@@ -59,15 +59,17 @@ make build
 
 ## Usage
 
+Basic example (local testing without authentication):
+
 ```bash
-jhub-app-proxy --port 8000 --destport 3000 \
+jhub-app-proxy --port 8000 --destport 3000 --authtype none --log-format pretty \
   -- python -m http.server 3000
 ```
 
 With conda environment:
 
 ```bash
-jhub-app-proxy --port 8000 --destport 8501 \
+jhub-app-proxy --port 8000 --destport 8501 --authtype none --log-format pretty \
   --conda-env my-env \
   -- streamlit run app.py
 ```
@@ -75,11 +77,13 @@ jhub-app-proxy --port 8000 --destport 8501 \
 With git repository:
 
 ```bash
-jhub-app-proxy --port 8000 --destport 8050 \
+jhub-app-proxy --port 8000 --destport 8050 --authtype none --log-format pretty \
   --repo https://github.com/nebari-dev/jhub-apps-from-git-repo-example \
   --conda-env dashapp \
   -- python app.py
 ```
+
+**Note:** For local testing, use `--authtype none` and `--log-format pretty` for readable logs. In JupyterHub deployments, use `--authtype oauth` (default) which requires `JUPYTERHUB_API_URL` and related environment variables to be set.
 
 ## How It Works
 
