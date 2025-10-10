@@ -23,10 +23,11 @@ type Handler struct {
 	logsHandler  http.Handler
 	authType     string
 	oauthMW      *auth.OAuthMiddleware
+	progressive  bool
 }
 
 // NewHandler creates a new proxy handler
-func NewHandler(manager *process.ManagerWithLogs, upstreamURL string, logsHandler http.Handler, authType string, log *logger.Logger) (*Handler, error) {
+func NewHandler(manager *process.ManagerWithLogs, upstreamURL string, logsHandler http.Handler, authType string, progressive bool, log *logger.Logger) (*Handler, error) {
 	target, _ := url.Parse(upstreamURL)
 
 	var oauthMW *auth.OAuthMiddleware
@@ -38,15 +39,26 @@ func NewHandler(manager *process.ManagerWithLogs, upstreamURL string, logsHandle
 		}
 	}
 
-	return &Handler{
-		manager:      manager,
-		upstreamURL:  upstreamURL,
-		reverseProxy: httputil.NewSingleHostReverseProxy(target),
-		logger:       log,
-		logsHandler:  logsHandler,
-		authType:     authType,
-		oauthMW:      oauthMW,
-	}, nil
+	h := &Handler{
+		manager:     manager,
+		upstreamURL: upstreamURL,
+		logger:      log,
+		logsHandler: logsHandler,
+		authType:    authType,
+		oauthMW:     oauthMW,
+		progressive: progressive,
+	}
+
+	// Configure reverse proxy
+	if progressive {
+		// For progressive mode, use custom transport with flushing
+		h.reverseProxy = httputil.NewSingleHostReverseProxy(target)
+		h.reverseProxy.FlushInterval = -1 // Flush immediately on each write
+	} else {
+		h.reverseProxy = httputil.NewSingleHostReverseProxy(target)
+	}
+
+	return h, nil
 }
 
 // ServeHTTP implements http.Handler

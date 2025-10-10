@@ -51,14 +51,14 @@ make build
 ## Usage
 
 ```bash
-jhub-app-proxy --port 8000 --upstream http://localhost:3000 \
+jhub-app-proxy --port 8000 --destport 3000 \
   -- python -m http.server 3000
 ```
 
 With conda environment:
 
 ```bash
-jhub-app-proxy --port 8000 --upstream http://localhost:8501 \
+jhub-app-proxy --port 8000 --destport 8501 \
   --conda-env my-env \
   -- streamlit run app.py
 ```
@@ -66,8 +66,8 @@ jhub-app-proxy --port 8000 --upstream http://localhost:8501 \
 With git repository:
 
 ```bash
-jhub-app-proxy --port 8000 --upstream http://localhost:8050 \
-  --git-url https://github.com/user/dash-app.git \
+jhub-app-proxy --port 8000 --destport 8050 \
+  --repo https://github.com/nebari-dev/jhub-apps-from-git-repo-example \
   --conda-env dashapp \
   -- python app.py
 ```
@@ -82,10 +82,32 @@ jhub-app-proxy --port 8000 --upstream http://localhost:8050 \
 
 ## Configuration
 
-- `--port` - Port to listen on (default: 8000)
-- `--upstream` - URL of the application to proxy to
-- `--conda-env` - Conda environment to activate
-- `--git-url` - Git repository to clone
-- `--health-check-url` - Custom health check endpoint
-- `--health-check-timeout` - Health check timeout (default: 5m)
+### Core Flags
+- `--port` - Port for proxy server to listen on (default: 8888)
+- `--destport` - Internal subprocess port (0 = random, default: 0)
+- `--authtype` - Authentication type: `oauth`, `none` (default: `oauth`)
+
+### Process Management
+- `--conda-env` - Conda environment to activate before running command
+- `--workdir` - Working directory for the process
+- `--force-alive` - Force keep-alive to prevent idle culling (default: `true`)
+- `--no-force-alive` - Disable force keep-alive, report only real activity
+
+### Git Repository
+- `--repo` - Git repository URL to clone before starting app
+- `--repofolder` - Destination folder for git clone
+- `--repobranch` - Git branch to checkout (default: `main`)
+
+### Health Check
+- `--ready-check-path` - Health check URL path (default: `/`)
+- `--ready-timeout` - Health check timeout in seconds (default: 300)
+
+### Logging
+- `--log-level` - Log level: `debug`, `info`, `warn`, `error` (default: `info`)
+- `--log-format` - Log format: `json`, `pretty` (default: `json`)
+- `--log-buffer-size` - Number of subprocess log lines to keep in memory (default: 1000)
+- `--log-caller` - Show file:line in logs (default: `false`)
+
+### Progressive Streaming
+- `--progressive` - Enable progressive response streaming, useful for Voila to show results as they're computed (default: `false`)
 

@@ -101,13 +101,12 @@ Framework-agnostic - works with any web application (Streamlit, Voila, Panel, et
 		"Conda environment to activate")
 	rootCmd.Flags().StringVar(&cfg.WorkDir, "workdir", "",
 		"Working directory for the process")
-	rootCmd.Flags().BoolVar(&cfg.ForceAlive, "force-alive", false,
+	rootCmd.Flags().BoolVar(&cfg.ForceAlive, "force-alive", true,
 		"Force keep-alive (prevent idle culling)")
 
-	// Legacy compatibility flag (no-op since false is already the default)
-	var noForceAlive bool
-	rootCmd.Flags().BoolVar(&noForceAlive, "no-force-alive", false,
-		"Disable force keep-alive (default behavior)")
+	// Legacy compatibility flag that sets force-alive to false
+	rootCmd.Flags().BoolVar(&cfg.ForceAlive, "no-force-alive", false,
+		"Disable force keep-alive (report only real activity)")
 
 	// Git repository flags
 	rootCmd.Flags().StringVar(&cfg.Repo, "repo", "",
@@ -273,7 +272,7 @@ func run(cfg *Config) error {
 	// Create intelligent proxy that shows logs until app is ready
 	// Proxy forwards to subprocess on internal port
 	subprocessURL := fmt.Sprintf("http://127.0.0.1:%d", subprocessPort)
-	proxyHandler, err := proxy.NewHandler(mgr, subprocessURL, mux, cfg.AuthType, log)
+	proxyHandler, err := proxy.NewHandler(mgr, subprocessURL, mux, cfg.AuthType, cfg.Progressive, log)
 	if err != nil {
 		return fmt.Errorf("failed to create proxy handler: %w", err)
 	}
