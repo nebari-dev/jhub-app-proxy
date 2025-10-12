@@ -278,13 +278,14 @@ func run(cfg *Config) error {
 	}
 
 	// Handle JupyterHub service prefix (e.g., /user/admin/servername)
-	// This is the industry-standard way to handle apps running under a subpath
+	// Pass through the full path to the backend application unchanged.
+	// The backend app is responsible for handling the service prefix.
 	var handler http.Handler = proxyHandler
 	if servicePrefix := os.Getenv("JUPYTERHUB_SERVICE_PREFIX"); servicePrefix != "" {
 		// Strip trailing slash for consistent behavior
 		servicePrefix = strings.TrimSuffix(servicePrefix, "/")
 		log.Info("using JupyterHub service prefix", "prefix", servicePrefix)
-		handler = http.StripPrefix(servicePrefix, proxyHandler)
+		// Note: We do NOT strip the prefix - apps like JupyterLab handle it themselves
 	}
 
 	// Start proxy server on the port JupyterHub expects
