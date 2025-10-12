@@ -24,8 +24,11 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
+    - name: Install tools
+      run: make tools
+
     - name: Run tests
-      run: go test -v -race -coverprofile=coverage.out ./...
+      run: make test
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5

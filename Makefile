@@ -1,4 +1,4 @@
-.PHONY: build test clean install run dev lint fmt deps help
+.PHONY: build test test-integration clean install run dev lint fmt deps tools help
 
 # Build variables
 BINARY_NAME=jhub-app-proxy
@@ -19,7 +19,11 @@ build-race:
 # Run tests
 test:
 	@echo "Running tests..."
-	go test -v -race -coverprofile=coverage.out ./...
+	@if command -v gotestsum >/dev/null 2>&1; then \
+		gotestsum --format testname -- -race -coverprofile=coverage.out ./...; \
+	else \
+		go test -v -race -coverprofile=coverage.out ./...; \
+	fi
 
 # Run tests with coverage report
 test-coverage: test
@@ -27,10 +31,28 @@ test-coverage: test
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
 
+# Run integration tests (use VERBOSE=1 to show logs)
+test-integration:
+	@echo "Running integration tests..."
+	@if [ "$(VERBOSE)" = "1" ]; then \
+		if command -v gotestsum >/dev/null 2>&1; then \
+			gotestsum --format standard-verbose -- -timeout 5m ./test/integration/...; \
+		else \
+			go test -v -timeout 5m ./test/integration/...; \
+		fi \
+	else \
+		if command -v gotestsum >/dev/null 2>&1; then \
+			gotestsum --format testdox -- -timeout 5m ./test/integration/...; \
+		else \
+			go test -v -timeout 5m ./test/integration/...; \
+		fi \
+	fi
+
 # Clean build artifacts
 clean:
 	@echo "Cleaning..."
 	rm -f ${BINARY_NAME}
+	rm -f ${BINARY_NAME}-test
 	rm -f coverage.out coverage.html
 	go clean
 
@@ -65,25 +87,33 @@ deps:
 	go mod download
 	go mod tidy
 
-# Initialize project (first time setup)
-init: deps
-	@echo "Initializing project..."
+# Install development tools
+tools:
 	@echo "Installing development tools..."
+	@go install gotest.tools/gotestsum@latest
+	@echo "Tools installed successfully"
+
+# Initialize project (first time setup)
+init: deps tools
+	@echo "Initializing project..."
+	@echo "Installing linter..."
 	@which golangci-lint > /dev/null || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell go env GOPATH)/bin
 	@echo "Setup complete!"
 
 # Show help
 help:
 	@echo "Available targets:"
-	@echo "  build           - Build the binary"
-	@echo "  build-race      - Build with race detector"
-	@echo "  test            - Run tests"
-	@echo "  test-coverage   - Run tests with coverage report"
+	@echo "  build            - Build the binary"
+	@echo "  build-race       - Build with race detector"
+	@echo "  test             - Run tests"
+	@echo "  test-integration - Run integration tests (use VERBOSE=1 for logs)"
+	@echo "  test-coverage    - Run tests with coverage report"
 	@echo "  clean           - Clean build artifacts"
 	@echo "  install         - Install the binary"
 	@echo "  dev             - Run in development mode"
 	@echo "  fmt             - Format code"
 	@echo "  lint            - Run linters"
 	@echo "  deps            - Download dependencies"
+	@echo "  tools           - Install development tools (gotestsum)"
 	@echo "  init            - Initialize project (first time)"
 	@echo "  help            - Show this help message"
