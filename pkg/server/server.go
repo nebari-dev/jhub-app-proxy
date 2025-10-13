@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nebari-dev/jhub-app-proxy/pkg/api"
+	"github.com/nebari-dev/jhub-app-proxy/pkg/auth"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/config"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/hub"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/interim"
@@ -58,9 +59,38 @@ func New(cfg Config) (*Server, error) {
 	mux := http.NewServeMux()
 	api.Version = cfg.Version
 
-	// Create and register logs API handler
+	// Create OAuth middleware if authentication is enabled for main app OR interim pages
+	var oauthMW *auth.OAuthMiddleware
+	needsOAuth := cfg.AppConfig.AuthType == "oauth" || cfg.AppConfig.InterimPageAuth
+
+	if needsOAuth {
+		var err error
+		oauthMW, err = auth.NewOAuthMiddleware(log)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OAuth middleware: %w", err)
+		}
+
+		if cfg.AppConfig.AuthType == "oauth" {
+			log.Info("OAuth authentication enabled for ALL routes (app + interim pages)")
+		} else if cfg.AppConfig.InterimPageAuth {
+			log.Info("OAuth authentication enabled for INTERIM PAGES ONLY (app is public)")
+		}
+	}
+
+	// CRITICAL SECURITY: Determine if interim pages need authentication
+	// If --authtype=oauth: protect everything (app + interim pages)
+	// If --interim-page-auth: protect only interim pages (app is public)
+	// Otherwise: protect nothing
+	protectInterim := cfg.AppConfig.AuthType == "oauth" || cfg.AppConfig.InterimPageAuth
+
+	// CRITICAL SECURITY: Register logs API handler with or without authentication
 	logsHandler := api.NewLogsHandler(cfg.Manager, log)
-	logsHandler.RegisterInterimRoutes(mux, interimBasePath)
+	if protectInterim && oauthMW != nil {
+		logsHandler.RegisterInterimRoutesWithAuth(mux, interimBasePath, oauthMW)
+	} else {
+		logsHandler.RegisterInterimRoutes(mux, interimBasePath)
+		log.Warn("logs API NOT protected - sensitive logs exposed!", "path", interimBasePath+"/api/*")
+	}
 
 	// Create interim page handler
 	interimHandler := interim.NewHandler(interim.Config{
@@ -68,7 +98,16 @@ func New(cfg Config) (*Server, error) {
 		Logger:     log,
 		AppURLPath: appRootPath,
 	})
-	mux.Handle(interimBasePath, interimHandler)
+
+	// CRITICAL SECURITY: Wrap interim handler with OAuth authentication if needed
+	// Interim pages can expose sensitive subprocess logs!
+	if protectInterim && oauthMW != nil {
+		mux.Handle(interimBasePath, oauthMW.Wrap(interimHandler))
+		log.Info("interim page protected with OAuth authentication", "path", interimBasePath)
+	} else {
+		mux.Handle(interimBasePath, interimHandler)
+		log.Warn("interim page NOT protected - sensitive logs exposed!", "path", interimBasePath)
+	}
 
 	// Create backend proxy handler
 	proxyHandler, err := proxy.NewHandler(

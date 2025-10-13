@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/nebari-dev/jhub-app-proxy/pkg/auth"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/logger"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/process"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/ui"
@@ -275,6 +276,9 @@ func (h *LogsHandler) RegisterRoutesWithPrefix(mux *http.ServeMux, prefix string
 // These routes are at /_temp/jhub-app-proxy/api/* (or with service prefix)
 // and are used by the interim log viewer page.
 //
+// SECURITY: These routes are NOT automatically protected by authentication.
+// The caller MUST wrap them with OAuth middleware if authentication is required.
+//
 // Grace Period Behavior:
 // These routes remain accessible for a grace period after the app deploys,
 // allowing the interim page to fetch final logs before redirecting.
@@ -291,6 +295,34 @@ func (h *LogsHandler) RegisterInterimRoutes(mux *http.ServeMux, basePath string)
 	mux.HandleFunc(basePath+"/api/logo", h.HandleGetLogo)
 
 	h.logger.Info("interim log API routes registered",
+		"base_path", basePath,
+		"endpoints", []string{
+			"GET " + basePath + "/api/logs",
+			"GET " + basePath + "/api/logs/all",
+			"GET " + basePath + "/api/logs/since",
+			"GET " + basePath + "/api/logs/stats",
+			"DELETE " + basePath + "/api/logs/clear",
+			"GET " + basePath + "/api/logo",
+		})
+}
+
+// RegisterInterimRoutesWithAuth registers all log API routes under the interim path with OAuth authentication
+// CRITICAL SECURITY: Use this method instead of RegisterInterimRoutes when OAuth is enabled!
+//
+// Parameters:
+//   - mux: The HTTP request multiplexer
+//   - basePath: The base interim path
+//   - oauthMW: OAuth middleware for authentication
+func (h *LogsHandler) RegisterInterimRoutesWithAuth(mux *http.ServeMux, basePath string, oauthMW *auth.OAuthMiddleware) {
+	// Wrap each handler with OAuth middleware
+	mux.Handle(basePath+"/api/logs", oauthMW.Wrap(http.HandlerFunc(h.HandleGetLogs)))
+	mux.Handle(basePath+"/api/logs/all", oauthMW.Wrap(http.HandlerFunc(h.HandleGetAllLogs)))
+	mux.Handle(basePath+"/api/logs/since", oauthMW.Wrap(http.HandlerFunc(h.HandleGetLogsSince)))
+	mux.Handle(basePath+"/api/logs/stats", oauthMW.Wrap(http.HandlerFunc(h.HandleGetStats)))
+	mux.Handle(basePath+"/api/logs/clear", oauthMW.Wrap(http.HandlerFunc(h.HandleClearLogs)))
+	mux.Handle(basePath+"/api/logo", oauthMW.Wrap(http.HandlerFunc(h.HandleGetLogo)))
+
+	h.logger.Info("interim log API routes registered WITH OAUTH PROTECTION",
 		"base_path", basePath,
 		"endpoints", []string{
 			"GET " + basePath + "/api/logs",

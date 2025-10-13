@@ -11,7 +11,8 @@ import (
 // Config holds application configuration
 type Config struct {
 	// Authentication
-	AuthType string // "oauth", "none"
+	AuthType        string // "oauth", "none"
+	InterimPageAuth bool   // If true, protect interim pages/logs API even when AuthType is "none"
 
 	// Process
 	Command     []string
@@ -71,6 +72,8 @@ Framework-agnostic - works with any web application (Streamlit, Voila, Panel, et
 	// Core flags
 	rootCmd.Flags().StringVar(&cfg.AuthType, "authtype", "oauth",
 		"Authentication type (oauth, none)")
+	rootCmd.Flags().BoolVar(&cfg.InterimPageAuth, "interim-page-auth", false,
+		"Protect interim pages and logs API with OAuth even when --authtype=none (allows public app with protected logs)")
 	rootCmd.Flags().IntVar(&cfg.Port, "port", 0,
 		"Port for proxy server to listen on (what JupyterHub expects)")
 	rootCmd.Flags().IntVar(&cfg.ListenPort, "listen-port", 0,
