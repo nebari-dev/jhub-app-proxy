@@ -247,3 +247,57 @@ func (h *LogsHandler) RegisterRoutes(mux *http.ServeMux) {
 			"GET /api/logo",
 		})
 }
+
+// RegisterRoutesWithPrefix registers all log API routes with a prefix
+// For example, with prefix "/user/admin/app", routes become:
+// /user/admin/app/api/logs, /user/admin/app/api/logs/all, etc.
+func (h *LogsHandler) RegisterRoutesWithPrefix(mux *http.ServeMux, prefix string) {
+	mux.HandleFunc(prefix+"/api/logs", h.HandleGetLogs)
+	mux.HandleFunc(prefix+"/api/logs/all", h.HandleGetAllLogs)
+	mux.HandleFunc(prefix+"/api/logs/since", h.HandleGetLogsSince)
+	mux.HandleFunc(prefix+"/api/logs/stats", h.HandleGetStats)
+	mux.HandleFunc(prefix+"/api/logs/clear", h.HandleClearLogs)
+	mux.HandleFunc(prefix+"/api/logo", h.HandleGetLogo)
+
+	h.logger.Info("log API routes registered with prefix",
+		"prefix", prefix,
+		"endpoints", []string{
+			"GET " + prefix + "/api/logs",
+			"GET " + prefix + "/api/logs/all",
+			"GET " + prefix + "/api/logs/since",
+			"GET " + prefix + "/api/logs/stats",
+			"DELETE " + prefix + "/api/logs/clear",
+			"GET " + prefix + "/api/logo",
+		})
+}
+
+// RegisterInterimRoutes registers all log API routes under the interim path
+// These routes are at /_temp/jhub-app-proxy/api/* (or with service prefix)
+// and are used by the interim log viewer page.
+//
+// Grace Period Behavior:
+// These routes remain accessible for a grace period after the app deploys,
+// allowing the interim page to fetch final logs before redirecting.
+//
+// Parameters:
+//   - mux: The HTTP request multiplexer
+//   - basePath: The base interim path (e.g., "/_temp/jhub-app-proxy" or "/user/admin/app/_temp/jhub-app-proxy")
+func (h *LogsHandler) RegisterInterimRoutes(mux *http.ServeMux, basePath string) {
+	mux.HandleFunc(basePath+"/api/logs", h.HandleGetLogs)
+	mux.HandleFunc(basePath+"/api/logs/all", h.HandleGetAllLogs)
+	mux.HandleFunc(basePath+"/api/logs/since", h.HandleGetLogsSince)
+	mux.HandleFunc(basePath+"/api/logs/stats", h.HandleGetStats)
+	mux.HandleFunc(basePath+"/api/logs/clear", h.HandleClearLogs)
+	mux.HandleFunc(basePath+"/api/logo", h.HandleGetLogo)
+
+	h.logger.Info("interim log API routes registered",
+		"base_path", basePath,
+		"endpoints", []string{
+			"GET " + basePath + "/api/logs",
+			"GET " + basePath + "/api/logs/all",
+			"GET " + basePath + "/api/logs/since",
+			"GET " + basePath + "/api/logs/stats",
+			"DELETE " + basePath + "/api/logs/clear",
+			"GET " + basePath + "/api/logo",
+		})
+}

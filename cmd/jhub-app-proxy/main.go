@@ -16,6 +16,7 @@ import (
 	"github.com/nebari-dev/jhub-app-proxy/pkg/git"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/health"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/hub"
+	"github.com/nebari-dev/jhub-app-proxy/pkg/interim"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/logger"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/port"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/process"
@@ -35,11 +36,12 @@ type Config struct {
 	AuthType string // "oauth", "none"
 
 	// Process
-	Command    []string
-	DestPort   int
-	CondaEnv   string
-	WorkDir    string
-	ForceAlive bool
+	Command     []string
+	DestPort    int
+	CondaEnv    string
+	WorkDir     string
+	ForceAlive  bool
+	StripPrefix bool // Strip service prefix before forwarding (default: true for most apps)
 
 	// Git
 	Repo       string
@@ -107,6 +109,10 @@ Framework-agnostic - works with any web application (Streamlit, Voila, Panel, et
 	// Legacy compatibility flag that sets force-alive to false
 	rootCmd.Flags().BoolVar(&cfg.ForceAlive, "no-force-alive", false,
 		"Disable force keep-alive (report only real activity)")
+
+	// Prefix handling (default: strip prefix like jhsingle-native-proxy)
+	rootCmd.Flags().BoolVar(&cfg.StripPrefix, "strip-prefix", true,
+		"Strip service prefix before forwarding to backend (default: true, use false for JupyterLab)")
 
 	// Git repository flags
 	rootCmd.Flags().StringVar(&cfg.Repo, "repo", "",
@@ -263,30 +269,118 @@ func run(cfg *Config) error {
 		return fmt.Errorf("failed to create process manager: %w", err)
 	}
 
-	// Setup log API endpoints
+	// =============================================================================
+	// Routing Setup: Clean separation of interim page, logs API, and backend app
+	// =============================================================================
+	//
+	// Architecture:
+	// 1. Interim page at: {prefix}/_temp/jhub-app-proxy
+	//    - Shows logs while app is starting
+	//    - Auto-redirects to app once ready
+	//    - Accessible for 10s grace period after deployment
+	//
+	// 2. Logs API at: {prefix}/_temp/jhub-app-proxy/api/*
+	//    - Used by interim page to fetch logs
+	//    - Only accessible while app not running OR during grace period
+	//
+	// 3. Application routes at: {prefix}/*
+	//    - Redirects to interim page while app not running
+	//    - Forwards to backend app once running
+	//
+	// This design ensures no path conflicts between jhub-app-proxy and backend apps.
+
+	// Get JupyterHub service prefix (e.g., /user/admin/servername)
+	servicePrefix := os.Getenv("JUPYTERHUB_SERVICE_PREFIX")
+	if servicePrefix != "" {
+		servicePrefix = strings.TrimSuffix(servicePrefix, "/")
+		log.Info("using JupyterHub service prefix", "prefix", servicePrefix)
+	}
+
+	// Build paths
+	interimBasePath := servicePrefix + interim.InterimPath  // e.g., "/user/admin/app/_temp/jhub-app-proxy"
+	appRootPath := servicePrefix + "/"                       // e.g., "/user/admin/app/" or "/"
+
+	// Setup HTTP request multiplexer
 	mux := http.NewServeMux()
 	api.Version = Version // Set version for API responses
-	logsHandler := api.NewLogsHandler(mgr, log)
-	logsHandler.RegisterRoutes(mux)
 
-	// Create intelligent proxy that shows logs until app is ready
-	// Proxy forwards to subprocess on internal port
+	// Create logs API handler
+	logsHandler := api.NewLogsHandler(mgr, log)
+	// Register logs API at interim path: {prefix}/_temp/jhub-app-proxy/api/*
+	logsHandler.RegisterInterimRoutes(mux, interimBasePath)
+
+	// Create interim page handler
+	interimHandler := interim.NewHandler(interim.Config{
+		Manager:    mgr,
+		Logger:     log,
+		AppURLPath: appRootPath,
+	})
+	// Register interim page at: {prefix}/_temp/jhub-app-proxy
+	mux.Handle(interimBasePath, interimHandler)
+
+	// Create backend proxy handler
 	subprocessURL := fmt.Sprintf("http://127.0.0.1:%d", subprocessPort)
-	proxyHandler, err := proxy.NewHandler(mgr, subprocessURL, mux, cfg.AuthType, cfg.Progressive, log)
+	proxyHandler, err := proxy.NewHandler(mgr, subprocessURL, cfg.AuthType, cfg.Progressive, servicePrefix, cfg.StripPrefix, log)
 	if err != nil {
 		return fmt.Errorf("failed to create proxy handler: %w", err)
 	}
 
-	// Handle JupyterHub service prefix (e.g., /user/admin/servername)
-	// Pass through the full path to the backend application unchanged.
-	// The backend app is responsible for handling the service prefix.
-	var handler http.Handler = proxyHandler
-	if servicePrefix := os.Getenv("JUPYTERHUB_SERVICE_PREFIX"); servicePrefix != "" {
-		// Strip trailing slash for consistent behavior
-		servicePrefix = strings.TrimSuffix(servicePrefix, "/")
-		log.Info("using JupyterHub service prefix", "prefix", servicePrefix)
-		// Note: We do NOT strip the prefix - apps like JupyterLab handle it themselves
-	}
+	// Setup main request router with intelligent routing
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		log.Info("incoming request",
+			"method", r.Method,
+			"path", path,
+			"remote_addr", r.RemoteAddr)
+
+		// Route 1: Interim page and its API (during startup + grace period)
+		if strings.HasPrefix(path, interimBasePath) {
+			// Check if we should still serve the interim infrastructure
+			if interimHandler.ShouldServeLogsAPI() {
+				log.Info("routing to interim infrastructure",
+					"path", path,
+					"reason", "app not running or in grace period")
+				mux.ServeHTTP(w, r)
+				return
+			}
+			// Grace period expired - redirect to app
+			log.Info("redirecting from interim to app",
+				"from", path,
+				"to", appRootPath,
+				"reason", "grace period expired")
+			http.Redirect(w, r, appRootPath, http.StatusTemporaryRedirect)
+			return
+		}
+
+		// Route 2: Application routes
+		// Check if path matches our service prefix (if any)
+		if servicePrefix != "" && !strings.HasPrefix(path, servicePrefix+"/") {
+			// Path doesn't match our prefix - 404
+			log.Info("path does not match service prefix",
+				"path", path,
+				"expected_prefix", servicePrefix,
+				"response", "404")
+			http.NotFound(w, r)
+			return
+		}
+
+		// If app is NOT running, serve interim page directly with 200 OK
+		// This ensures JupyterHub sees the server as "ready" even during startup
+		if !mgr.IsRunning() {
+			log.Info("serving interim page (app not running)",
+				"path", path,
+				"app_status", "not_running")
+			interimHandler.ServeHTTP(w, r)
+			return
+		}
+
+		// App is running - forward to backend
+		log.Info("proxying to backend",
+			"path", path,
+			"backend_url", subprocessURL,
+			"app_status", "running")
+		proxyHandler.ServeHTTP(w, r)
+	})
 
 	// Start proxy server on the port JupyterHub expects
 	apiServer := &http.Server{
@@ -343,9 +437,14 @@ func run(cfg *Config) error {
 			log.Info("==================================================")
 			log.Info("application ready",
 				"app_url", appURL,
-				"logs_api", fmt.Sprintf("%s/api/logs", appURL),
+				"interim_page", fmt.Sprintf("%s%s", appURL, interimBasePath),
 				"pid", mgr.GetPID())
 			log.Info("==================================================")
+
+			// Mark app as deployed - starts grace period timer
+			// IMPORTANT: Call this AFTER Start() completes successfully,
+			// which means the health check has passed and app is truly ready
+			interimHandler.MarkAppDeployed()
 
 			// Start JupyterHub activity reporter if in oauth mode
 			if cfg.AuthType == "oauth" {

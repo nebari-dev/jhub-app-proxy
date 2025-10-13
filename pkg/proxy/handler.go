@@ -1,4 +1,7 @@
-// Package proxy provides intelligent HTTP proxying with startup log viewing
+// Package proxy provides HTTP reverse proxying to backend applications
+//
+// This package is responsible ONLY for forwarding requests to the backend application.
+// It does not handle interim pages or logs API - those are handled by the routing layer in main.
 package proxy
 
 import (
@@ -6,28 +9,27 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
 
 	"github.com/nebari-dev/jhub-app-proxy/pkg/auth"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/logger"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/process"
-	"github.com/nebari-dev/jhub-app-proxy/pkg/ui"
 )
 
-// Handler is an intelligent proxy that shows logs until the app is ready
+// Handler forwards HTTP requests to the backend application
 type Handler struct {
-	manager      *process.ManagerWithLogs
-	upstreamURL  string
-	reverseProxy *httputil.ReverseProxy
-	logger       *logger.Logger
-	logsHandler  http.Handler
-	authType     string
-	oauthMW      *auth.OAuthMiddleware
-	progressive  bool
+	manager       *process.ManagerWithLogs
+	upstreamURL   string
+	reverseProxy  *httputil.ReverseProxy
+	logger        *logger.Logger
+	authType      string
+	oauthMW       *auth.OAuthMiddleware
+	progressive   bool
+	servicePrefix string // JupyterHub service prefix
+	stripPrefix   bool   // Whether to strip prefix before forwarding (default: true)
 }
 
 // NewHandler creates a new proxy handler
-func NewHandler(manager *process.ManagerWithLogs, upstreamURL string, logsHandler http.Handler, authType string, progressive bool, log *logger.Logger) (*Handler, error) {
+func NewHandler(manager *process.ManagerWithLogs, upstreamURL string, authType string, progressive bool, servicePrefix string, stripPrefix bool, log *logger.Logger) (*Handler, error) {
 	target, _ := url.Parse(upstreamURL)
 
 	var oauthMW *auth.OAuthMiddleware
@@ -40,13 +42,14 @@ func NewHandler(manager *process.ManagerWithLogs, upstreamURL string, logsHandle
 	}
 
 	h := &Handler{
-		manager:     manager,
-		upstreamURL: upstreamURL,
-		logger:      log,
-		logsHandler: logsHandler,
-		authType:    authType,
-		oauthMW:     oauthMW,
-		progressive: progressive,
+		manager:       manager,
+		upstreamURL:   upstreamURL,
+		logger:        log,
+		authType:      authType,
+		oauthMW:       oauthMW,
+		progressive:   progressive,
+		servicePrefix: servicePrefix,
+		stripPrefix:   stripPrefix,
 	}
 
 	// Configure reverse proxy
@@ -74,26 +77,42 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
-	// Serve API endpoints
-	if strings.HasPrefix(r.URL.Path, "/api/") {
-		h.logsHandler.ServeHTTP(w, r)
-		return
+	originalPath := r.URL.Path
+	forwardPath := originalPath
+
+	// Strip prefix if configured (default for most apps like Streamlit, Voila, etc.)
+	// Don't strip for apps like JupyterLab that are configured with ServerApp.base_url
+	if h.stripPrefix && h.servicePrefix != "" {
+		// Strip the service prefix from the path
+		// e.g., /user/admin/custom-py/index.html -> /index.html
+		if len(originalPath) > len(h.servicePrefix) {
+			forwardPath = originalPath[len(h.servicePrefix):]
+		} else if originalPath == h.servicePrefix {
+			forwardPath = "/"
+		}
+
+		// Create new request with stripped path
+		newReq := r.Clone(r.Context())
+		newReq.URL.Path = forwardPath
+
+		backendURL := h.upstreamURL + forwardPath
+		h.logger.Info("proxying request to backend (prefix stripped)",
+			"original_path", originalPath,
+			"forwarded_path", forwardPath,
+			"backend_url", backendURL,
+			"service_prefix", h.servicePrefix,
+			"method", r.Method)
+
+		h.reverseProxy.ServeHTTP(w, newReq)
+	} else {
+		// Forward as-is (for apps configured with base_url like JupyterLab)
+		backendURL := h.upstreamURL + originalPath
+		h.logger.Info("proxying request to backend (no stripping)",
+			"path", originalPath,
+			"backend_url", backendURL,
+			"strip_prefix", h.stripPrefix,
+			"method", r.Method)
+
+		h.reverseProxy.ServeHTTP(w, r)
 	}
-
-	// If app is not running yet, show log viewer
-	if !h.manager.IsRunning() {
-		h.serveLogViewer(w, r)
-		return
-	}
-
-	// App is running, proxy to it
-	h.reverseProxy.ServeHTTP(w, r)
-}
-
-// serveLogViewer serves the log viewer HTML with 200 status
-// Always returns 200 so JupyterHub redirects users immediately to see the log viewer
-func (h *Handler) serveLogViewer(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK) // 200 - always ready (shows logs while app starts)
-	fmt.Fprint(w, ui.LogsHTML)
 }

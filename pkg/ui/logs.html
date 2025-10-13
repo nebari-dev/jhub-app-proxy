@@ -383,6 +383,24 @@
         let isReady = false;
         let lastLogCount = 0;
 
+        // Calculate base path for API calls
+        // The API is always at /_temp/jhub-app-proxy/api relative to the service prefix
+        // e.g., /user/admin/custom-py/_temp/jhub-app-proxy/api
+        const currentPath = window.location.pathname;
+
+        // Extract service prefix from current path
+        // e.g., /user/admin/custom-py/ -> /user/admin/custom-py
+        let servicePrefix = '';
+        if (currentPath !== '/' && currentPath !== '') {
+            // Remove trailing slash if present
+            const path = currentPath.endsWith('/') ? currentPath.slice(0, -1) : currentPath;
+            // If path looks like /user/admin/custom-py, that's our prefix
+            servicePrefix = path;
+        }
+
+        // API base is always at servicePrefix + /_temp/jhub-app-proxy/api
+        const apiBase = servicePrefix + '/_temp/jhub-app-proxy/api';
+
         // Auto-scroll state (default: true)
         let autoScrollEnabled = localStorage.getItem('autoScroll') !== 'false';
 
@@ -401,7 +419,7 @@
         // Load logo
         async function loadLogo() {
             try {
-                const response = await fetch('api/logo');
+                const response = await fetch(apiBase + '/logo');
                 const data = await response.json();
                 if (data.logo) {
                     logo.src = 'data:' + data.type + ';base64,' + data.logo;
@@ -432,7 +450,7 @@
 
         async function checkAppStatus() {
             try {
-                const response = await fetch('api/logs/stats');
+                const response = await fetch(apiBase + '/logs/stats');
                 const data = await response.json();
 
                 if (data.process_info && data.process_info.command) {
@@ -452,8 +470,31 @@
                         isReady = true;
                         progressContainer.classList.add('hidden');
                         title.innerHTML = 'Application ready, redirecting...';
-                        // Reload the page to show the running application
-                        window.location.reload();
+
+                        // Get the redirect URL from meta tag (injected by backend)
+                        // Falls back to calculating from current path if not present
+                        let appRoot = '/';
+                        const metaTag = document.querySelector('meta[name="app-redirect-url"]');
+                        if (metaTag) {
+                            appRoot = metaTag.getAttribute('content');
+                        } else {
+                            // Fallback: Calculate from current path (for backward compatibility)
+                            const currentPath = window.location.pathname;
+                            const tempPrefix = '/_temp/jhub-app-proxy';
+                            if (currentPath.includes(tempPrefix)) {
+                                const prefixEndIndex = currentPath.indexOf(tempPrefix);
+                                if (prefixEndIndex > 0) {
+                                    appRoot = currentPath.substring(0, prefixEndIndex) + '/';
+                                }
+                            }
+                        }
+
+                        console.log('Redirecting to app:', appRoot);
+
+                        // Redirect to application root
+                        setTimeout(() => {
+                            window.location.href = appRoot;
+                        }, 500); // Small delay to show "redirecting..." message
                     } else if (state === 'failed') {
                         title.innerHTML = 'Your app failed to deploy, please fix your mistakes!';
                         title.classList.add('error');
@@ -468,7 +509,7 @@
         let isInitialLoad = true;
         async function loadAllLogs() {
             try {
-                const response = await fetch('api/logs/all');
+                const response = await fetch(apiBase + '/logs/all');
                 const data = await response.json();
 
                 if (data.logs && data.logs.length > 0) {
@@ -495,7 +536,7 @@
             if (isInitialLoad) return;
 
             try {
-                const response = await fetch('api/logs?lines=100');
+                const response = await fetch(apiBase + '/logs?lines=100');
                 const data = await response.json();
 
                 if (data.logs && data.logs.length > 0) {

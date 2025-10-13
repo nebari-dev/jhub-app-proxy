@@ -15,6 +15,11 @@ import (
 	"time"
 )
 
+const (
+	// interimPath is the base path for the interim log viewer and its API
+	interimPath = "/_temp/jhub-app-proxy"
+)
+
 // TestBasicHTTPServer tests the simplest case: spawning a Python HTTP server
 // and verifying the complete workflow (logs page, logs API, proxying)
 func TestBasicHTTPServer(t *testing.T) {
@@ -86,8 +91,8 @@ func TestBasicHTTPServer(t *testing.T) {
 			t.Fatalf("App did not become ready: %v", err)
 		}
 
-		// Use /api/logs/all which reads from file and should have logs
-		resp, err := http.Get(proxyURL + "/api/logs/all")
+		// Use interim API path to get logs
+		resp, err := http.Get(proxyURL + interimPath + "/api/logs/all")
 		if err != nil {
 			t.Fatalf("Failed to get logs: %v", err)
 		}
@@ -121,7 +126,7 @@ func TestBasicHTTPServer(t *testing.T) {
 
 	// Test 3: Verify process stats API
 	t.Run("StatsAPI", func(t *testing.T) {
-		resp, err := http.Get(proxyURL + "/api/logs/stats")
+		resp, err := http.Get(proxyURL + interimPath + "/api/logs/stats")
 		if err != nil {
 			t.Fatalf("Failed to get stats: %v", err)
 		}
@@ -270,7 +275,7 @@ func waitForAppReady(proxyURL string, timeout time.Duration) error {
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for app to be ready")
 		case <-ticker.C:
-			resp, err := http.Get(proxyURL + "/api/logs/stats")
+			resp, err := http.Get(proxyURL + interimPath + "/api/logs/stats")
 			if err != nil {
 				continue
 			}
