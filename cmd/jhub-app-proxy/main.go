@@ -4,23 +4,17 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
-	"os/signal"
-	"strings"
-	"syscall"
 	"time"
 
-	"github.com/nebari-dev/jhub-app-proxy/pkg/api"
-	"github.com/nebari-dev/jhub-app-proxy/pkg/conda"
+	"github.com/nebari-dev/jhub-app-proxy/pkg/command"
+	"github.com/nebari-dev/jhub-app-proxy/pkg/config"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/git"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/health"
-	"github.com/nebari-dev/jhub-app-proxy/pkg/hub"
-	"github.com/nebari-dev/jhub-app-proxy/pkg/interim"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/logger"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/port"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/process"
-	"github.com/nebari-dev/jhub-app-proxy/pkg/proxy"
+	"github.com/nebari-dev/jhub-app-proxy/pkg/server"
 	"github.com/spf13/cobra"
 )
 
@@ -30,151 +24,40 @@ var (
 	BuildTime = "unknown"
 )
 
-// Config holds application configuration
-type Config struct {
-	// Authentication
-	AuthType string // "oauth", "none"
-
-	// Process
-	Command     []string
-	DestPort    int
-	CondaEnv    string
-	WorkDir     string
-	ForceAlive  bool
-	StripPrefix bool // Strip service prefix before forwarding (default: true for most apps)
-
-	// Git
-	Repo       string
-	RepoFolder string
-	RepoBranch string
-
-	// Health Check
-	ReadyCheckPath string
-	ReadyTimeout   int // seconds
-
-	// Logging
-	LogLevel      string
-	LogFormat     string
-	LogBufferSize int
-	ShowCaller    bool
-
-	// Server
-	Port       int // Port for proxy server (what JupyterHub expects)
-	ListenPort int // Deprecated: use Port instead
-
-	// Voila-specific
-	Progressive bool
-}
-
 func main() {
-	cfg := &Config{}
-
-	rootCmd := &cobra.Command{
-		Use:     "jhub-app-proxy [flags] -- command [args...]",
-		Short:   "Process spawner with OAuth2 authentication for JupyterHub apps",
-		Version: fmt.Sprintf("%s (built %s)", Version, BuildTime),
-		Long: `Spawns and manages web application processes with OAuth2 authentication,
-health monitoring, log capture, and JupyterHub integration.
-
-Framework-agnostic - works with any web application (Streamlit, Voila, Panel, etc).`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// If no command provided, show help
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-			// Remaining args are the command to run
-			cfg.Command = args
-			return run(cfg)
-		},
+	rootCmd, cfg, err := config.NewFromFlags(Version, BuildTime)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create config: %v\n", err)
+		os.Exit(1)
 	}
 
-	// Core flags
-	rootCmd.Flags().StringVar(&cfg.AuthType, "authtype", "oauth",
-		"Authentication type (oauth, none)")
-	rootCmd.Flags().IntVar(&cfg.Port, "port", 0,
-		"Port for proxy server to listen on (what JupyterHub expects)")
-	rootCmd.Flags().IntVar(&cfg.ListenPort, "listen-port", 0,
-		"Deprecated: use --port instead")
-	rootCmd.Flags().IntVar(&cfg.DestPort, "destport", 0,
-		"Internal subprocess port (0 = random)")
-
-	// Process management flags
-	rootCmd.Flags().StringVar(&cfg.CondaEnv, "conda-env", "",
-		"Conda environment to activate")
-	rootCmd.Flags().StringVar(&cfg.WorkDir, "workdir", "",
-		"Working directory for the process")
-	rootCmd.Flags().BoolVar(&cfg.ForceAlive, "force-alive", true,
-		"Force keep-alive (prevent idle culling)")
-
-	// Legacy compatibility flag that sets force-alive to false
-	rootCmd.Flags().BoolVar(&cfg.ForceAlive, "no-force-alive", false,
-		"Disable force keep-alive (report only real activity)")
-
-	// Prefix handling (default: strip prefix like jhsingle-native-proxy)
-	rootCmd.Flags().BoolVar(&cfg.StripPrefix, "strip-prefix", true,
-		"Strip service prefix before forwarding to backend (default: true, use false for JupyterLab)")
-
-	// Git repository flags
-	rootCmd.Flags().StringVar(&cfg.Repo, "repo", "",
-		"Git repository URL to clone")
-	rootCmd.Flags().StringVar(&cfg.RepoFolder, "repofolder", "",
-		"Destination folder for git clone")
-	rootCmd.Flags().StringVar(&cfg.RepoBranch, "repobranch", "main",
-		"Git branch to checkout")
-
-	// Health check flags
-	rootCmd.Flags().StringVar(&cfg.ReadyCheckPath, "ready-check-path", "/",
-		"Health check path (e.g., /, /health, /voila/static/)")
-	rootCmd.Flags().IntVar(&cfg.ReadyTimeout, "ready-timeout", 300,
-		"Health check timeout in seconds")
-
-	// Logging flags
-	rootCmd.Flags().StringVar(&cfg.LogLevel, "log-level", "info",
-		"Log level (debug, info, warn, error)")
-	rootCmd.Flags().StringVar(&cfg.LogFormat, "log-format", "json",
-		"Log format (json, pretty)")
-	rootCmd.Flags().IntVar(&cfg.LogBufferSize, "log-buffer-size", 1000,
-		"Number of subprocess log lines to keep in memory")
-	rootCmd.Flags().BoolVar(&cfg.ShowCaller, "log-caller", false,
-		"Show file:line in logs")
-
-	// Optional flags
-	rootCmd.Flags().BoolVar(&cfg.Progressive, "progressive", false,
-		"Enable progressive response streaming (for Voila)")
+	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return cmd.Help()
+		}
+		cfg.Command = args
+		return run(cfg)
+	}
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
-func run(cfg *Config) error {
-	// Handle backward compatibility: --listen-port → --port
-	if cfg.Port == 0 && cfg.ListenPort != 0 {
-		cfg.Port = cfg.ListenPort
-	}
-	// Try to get port from environment variable (JupyterHub sets this)
-	if cfg.Port == 0 {
-		if envPort := os.Getenv("JHUB_APPS_SPAWNER_PORT"); envPort != "" {
-			if port, err := fmt.Sscanf(envPort, "%d", &cfg.Port); err == nil && port == 1 {
-				// Port successfully parsed from environment - will log after logger is initialized
-			}
-		}
-	}
-	// Default port if still not set
-	if cfg.Port == 0 {
-		cfg.Port = 8888
-	}
+func run(cfg *config.Config) error {
+	// Normalize port configuration
+	cfg.NormalizePort()
 
 	// Initialize logger
 	logCfg := logger.Config{
 		Level:      logger.Level(cfg.LogLevel),
 		Format:     logger.Format(cfg.LogFormat),
 		ShowCaller: cfg.ShowCaller,
-		TimeFormat: "2006-01-02 15:04:05.000", // JupyterHub-style format with milliseconds
+		TimeFormat: "2006-01-02 15:04:05.000",
 	}
 	log := logger.New(logCfg)
 
-	// Log if port was loaded from environment
+	// Log port configuration
 	if envPort := os.Getenv("JHUB_APPS_SPAWNER_PORT"); envPort != "" {
 		log.Info("JHUB_APPS_SPAWNER_PORT environment variable", "value", envPort, "parsed_port", cfg.Port)
 	} else {
@@ -194,25 +77,10 @@ func run(cfg *Config) error {
 		"progressive":      cfg.Progressive,
 	})
 
+	// Setup context and signal handling
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	// Setup signal handling for graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Cancel context on signal (allows interrupting startup)
-	// Second signal forces immediate exit
-	go func() {
-		sig := <-sigChan
-		log.Info("received signal, initiating graceful shutdown (press Ctrl+C again to force quit)", "signal", sig)
-		cancel()
-
-		// Wait for second signal to force exit
-		sig = <-sigChan
-		log.Warn("received second signal, forcing immediate exit", "signal", sig)
-		os.Exit(1)
-	}()
+	server.SetupSignalHandling(ctx, cancel, log)
 
 	// Handle git repository cloning if specified
 	if cfg.Repo != "" {
@@ -221,251 +89,79 @@ func run(cfg *Config) error {
 		}
 	}
 
-	// Build the command with conda activation if needed
-	command, err := buildCommand(cfg, log)
+	// Build command with conda activation if needed
+	cmdBuilder := command.NewBuilder(log)
+	cmd, err := cmdBuilder.Build(cfg.Command, cfg.CondaEnv)
 	if err != nil {
 		return fmt.Errorf("failed to build command: %w", err)
 	}
 
-	// Use the specified port for proxy (what JupyterHub expects)
+	// Allocate ports
 	proxyPort := cfg.Port
 	log.Info("proxy will listen on port", "port", proxyPort)
 
-	// Allocate internal port for subprocess
 	subprocessPort, err := port.Allocate(cfg.DestPort)
 	if err != nil {
 		return fmt.Errorf("failed to allocate subprocess port: %w", err)
 	}
 	log.Info("allocated internal port for subprocess", "port", subprocessPort)
 
-	// Substitute {port} placeholder in command with subprocess port
-	command = substitutePort(command, subprocessPort)
-
-	// Build upstream URL for health check (against subprocess)
-	upstreamURL := fmt.Sprintf("http://127.0.0.1:%d%s", subprocessPort, cfg.ReadyCheckPath)
+	// Substitute port placeholders
+	cmd = command.SubstitutePort(cmd, subprocessPort)
 
 	// Create health checker
+	upstreamURL := fmt.Sprintf("http://127.0.0.1:%d%s", subprocessPort, cfg.ReadyCheckPath)
 	healthCfg := health.DefaultCheckConfig(upstreamURL)
 	healthCfg.Timeout = time.Duration(cfg.ReadyTimeout) * time.Second
 	healthChecker := health.NewChecker(healthCfg, log)
 
 	// Create process manager with log capture
-	processCfg := process.Config{
-		Command:  command,
-		Env:      buildEnv(cfg, subprocessPort),
-		WorkDir:  cfg.WorkDir,
-		ReadyCheck: func(ctx context.Context) error {
-			return healthChecker.WaitUntilReady(ctx)
+	mgr, err := process.NewManagerWithLogs(
+		process.Config{
+			Command: cmd,
+			Env:     command.BuildEnv(),
+			WorkDir: cfg.WorkDir,
+			ReadyCheck: func(ctx context.Context) error {
+				return healthChecker.WaitUntilReady(ctx)
+			},
 		},
-	}
-
-	logCaptureCfg := process.LogCaptureConfig{
-		Enabled:    true,
-		BufferSize: cfg.LogBufferSize,
-	}
-
-	mgr, err := process.NewManagerWithLogs(processCfg, logCaptureCfg, log)
+		process.LogCaptureConfig{
+			Enabled:    true,
+			BufferSize: cfg.LogBufferSize,
+		},
+		log,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create process manager: %w", err)
 	}
 
-	// =============================================================================
-	// Routing Setup: Clean separation of interim page, logs API, and backend app
-	// =============================================================================
-	//
-	// Architecture:
-	// 1. Interim page at: {prefix}/_temp/jhub-app-proxy
-	//    - Shows logs while app is starting
-	//    - Auto-redirects to app once ready
-	//    - Accessible for 10s grace period after deployment
-	//
-	// 2. Logs API at: {prefix}/_temp/jhub-app-proxy/api/*
-	//    - Used by interim page to fetch logs
-	//    - Only accessible while app not running OR during grace period
-	//
-	// 3. Application routes at: {prefix}/*
-	//    - Redirects to interim page while app not running
-	//    - Forwards to backend app once running
-	//
-	// This design ensures no path conflicts between jhub-app-proxy and backend apps.
-
-	// Get JupyterHub service prefix (e.g., /user/admin/servername)
-	servicePrefix := os.Getenv("JUPYTERHUB_SERVICE_PREFIX")
-	if servicePrefix != "" {
-		servicePrefix = strings.TrimSuffix(servicePrefix, "/")
-		log.Info("using JupyterHub service prefix", "prefix", servicePrefix)
-	}
-
-	// Build paths
-	interimBasePath := servicePrefix + interim.InterimPath  // e.g., "/user/admin/app/_temp/jhub-app-proxy"
-	appRootPath := servicePrefix + "/"                       // e.g., "/user/admin/app/" or "/"
-
-	// Setup HTTP request multiplexer
-	mux := http.NewServeMux()
-	api.Version = Version // Set version for API responses
-
-	// Create logs API handler
-	logsHandler := api.NewLogsHandler(mgr, log)
-	// Register logs API at interim path: {prefix}/_temp/jhub-app-proxy/api/*
-	logsHandler.RegisterInterimRoutes(mux, interimBasePath)
-
-	// Create interim page handler
-	interimHandler := interim.NewHandler(interim.Config{
-		Manager:    mgr,
-		Logger:     log,
-		AppURLPath: appRootPath,
-	})
-	// Register interim page at: {prefix}/_temp/jhub-app-proxy
-	mux.Handle(interimBasePath, interimHandler)
-
-	// Create backend proxy handler
+	// Create and start HTTP server
 	subprocessURL := fmt.Sprintf("http://127.0.0.1:%d", subprocessPort)
-	proxyHandler, err := proxy.NewHandler(mgr, subprocessURL, cfg.AuthType, cfg.Progressive, servicePrefix, cfg.StripPrefix, log)
-	if err != nil {
-		return fmt.Errorf("failed to create proxy handler: %w", err)
-	}
-
-	// Setup main request router with intelligent routing
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		log.Info("incoming request",
-			"method", r.Method,
-			"path", path,
-			"remote_addr", r.RemoteAddr)
-
-		// Route 1: Interim page and its API (during startup + grace period)
-		if strings.HasPrefix(path, interimBasePath) {
-			// Check if we should still serve the interim infrastructure
-			if interimHandler.ShouldServeLogsAPI() {
-				log.Info("routing to interim infrastructure",
-					"path", path,
-					"reason", "app not running or in grace period")
-				mux.ServeHTTP(w, r)
-				return
-			}
-			// Grace period expired - redirect to app
-			log.Info("redirecting from interim to app",
-				"from", path,
-				"to", appRootPath,
-				"reason", "grace period expired")
-			http.Redirect(w, r, appRootPath, http.StatusTemporaryRedirect)
-			return
-		}
-
-		// Route 2: Application routes
-		// Check if path matches our service prefix (if any)
-		if servicePrefix != "" && !strings.HasPrefix(path, servicePrefix+"/") {
-			// Path doesn't match our prefix - 404
-			log.Info("path does not match service prefix",
-				"path", path,
-				"expected_prefix", servicePrefix,
-				"response", "404")
-			http.NotFound(w, r)
-			return
-		}
-
-		// If app is NOT running, serve interim page directly with 200 OK
-		// This ensures JupyterHub sees the server as "ready" even during startup
-		if !mgr.IsRunning() {
-			log.Info("serving interim page (app not running)",
-				"path", path,
-				"app_status", "not_running")
-			interimHandler.ServeHTTP(w, r)
-			return
-		}
-
-		// App is running - forward to backend
-		log.Info("proxying to backend",
-			"path", path,
-			"backend_url", subprocessURL,
-			"app_status", "running")
-		proxyHandler.ServeHTTP(w, r)
+	srv, err := server.New(server.Config{
+		Manager:        mgr,
+		ProxyPort:      proxyPort,
+		SubprocessPort: subprocessPort,
+		SubprocessURL:  subprocessURL,
+		AppConfig:      cfg,
+		Logger:         log,
+		Version:        Version,
 	})
-
-	// Start proxy server on the port JupyterHub expects
-	apiServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", proxyPort),
-		Handler: handler,
+	if err != nil {
+		return fmt.Errorf("failed to create server: %w", err)
 	}
 
-	go func() {
-		log.Info("starting proxy server", "port", proxyPort)
-		if err := apiServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("proxy server failed", err)
-		}
-	}()
+	srv.Start()
+	defer srv.Shutdown()
 
-	// Ensure cleanup on exit
-	defer func() {
-		log.ShutdownBanner("shutting down")
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer shutdownCancel()
+	// Start subprocess
+	go srv.StartSubprocess(ctx, cmd)
 
-		// Stop subprocess first if running
-		if mgr.IsRunning() {
-			log.Info("stopping subprocess")
-			if err := mgr.Stop(); err != nil {
-				log.Error("failed to stop subprocess", err)
-			}
-		}
-
-		// Stop proxy server
-		log.Info("stopping proxy server")
-		if err := apiServer.Shutdown(shutdownCtx); err != nil {
-			log.Error("proxy server shutdown error", err)
-		}
-
-		log.Info("shutdown complete")
-	}()
-
-	// Start the subprocess in background (don't exit on failure - show logs instead)
-	log.Info("starting subprocess", "command", command)
-	go func() {
-		if err := mgr.Start(ctx); err != nil {
-			log.Error("failed to start subprocess", err)
-			// Add error to log buffer so users can see it
-			mgr.AddErrorLog(fmt.Sprintf("ERROR: Failed to start process: %s", err.Error()))
-			mgr.AddErrorLog(fmt.Sprintf("Command: %v", command))
-			// Don't exit - keep proxy server running to show logs
-		} else {
-			log.Info("subprocess started successfully",
-				"pid", mgr.GetPID(),
-				"internal_port", subprocessPort)
-
-			// Log application URLs with separators
-			appURL := fmt.Sprintf("http://127.0.0.1:%d", proxyPort)
-			log.Info("application ready",
-				"app_url", appURL,
-				"interim_page", fmt.Sprintf("%s%s", appURL, interimBasePath),
-				"pid", mgr.GetPID())
-
-			// Mark app as deployed - starts grace period timer
-			// IMPORTANT: Call this AFTER Start() completes successfully,
-			// which means the health check has passed and app is truly ready
-			interimHandler.MarkAppDeployed()
-
-			// Start JupyterHub activity reporter if in oauth mode
-			if cfg.AuthType == "oauth" {
-				if err := startActivityReporter(ctx, cfg, log); err != nil {
-					log.Warn("failed to start activity reporter (continuing anyway)", "error", err)
-				}
-			}
-		}
-	}()
-
-	// Log proxy server startup with separators
-	proxyURL := fmt.Sprintf("http://127.0.0.1:%d", proxyPort)
-	log.Info("proxy server ready",
-		"proxy_url", proxyURL,
-		"logs_api", fmt.Sprintf("%s/api/logs", proxyURL),
-		"internal_port", subprocessPort)
-
-	// Wait for shutdown signal (context will be cancelled by signal handler)
+	// Wait for shutdown
 	<-ctx.Done()
 	return nil
 }
 
-func handleGitClone(cfg *Config, log *logger.Logger) error {
+func handleGitClone(cfg *config.Config, log *logger.Logger) error {
 	gitMgr := git.NewManager(log)
 
 	if !gitMgr.IsGitInstalled() {
@@ -476,104 +172,8 @@ func handleGitClone(cfg *Config, log *logger.Logger) error {
 		RepoURL:  cfg.Repo,
 		Branch:   cfg.RepoBranch,
 		DestPath: cfg.RepoFolder,
-		Depth:    1, // Shallow clone for faster startup
+		Depth:    1,
 	}
 
 	return gitMgr.Clone(cloneCfg)
-}
-
-func buildCommand(cfg *Config, log *logger.Logger) ([]string, error) {
-	command := cfg.Command
-	if len(command) == 0 {
-		return nil, fmt.Errorf("no command specified")
-	}
-
-	// Apply conda activation if specified
-	if cfg.CondaEnv != "" {
-		condaMgr := conda.NewManager(log)
-		var err error
-		command, err = condaMgr.BuildActivationCommand(cfg.CondaEnv, command)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build conda activation: %w", err)
-		}
-	}
-
-	return command, nil
-}
-
-func buildEnv(cfg *Config, allocatedPort int) map[string]string {
-	env := make(map[string]string)
-
-	// Pass through JupyterHub environment variables
-	jupyterHubEnvVars := []string{
-		"JUPYTERHUB_API_TOKEN",
-		"JUPYTERHUB_API_URL",
-		"JUPYTERHUB_BASE_URL",
-		"JUPYTERHUB_USER",
-		"JUPYTERHUB_SERVER_NAME",
-		"JUPYTERHUB_SERVICE_PREFIX",
-		"JUPYTERHUB_GROUP",
-	}
-
-	for _, key := range jupyterHubEnvVars {
-		if val := os.Getenv(key); val != "" {
-			env[key] = val
-		}
-	}
-
-	return env
-}
-
-// substitutePort replaces jhsingle-native-proxy style placeholders in command arguments
-// Handles: {port} → actual port, {-} → -, {--} → --, and strips surrounding quotes
-func substitutePort(command []string, allocatedPort int) []string {
-	result := make([]string, len(command))
-	portStr := fmt.Sprintf("%d", allocatedPort)
-
-	for i, arg := range command {
-		processed := arg
-
-		// Replace port placeholder
-		processed = strings.ReplaceAll(processed, "{port}", portStr)
-
-		// Replace dash placeholders (jhsingle-native-proxy compatibility)
-		processed = strings.ReplaceAll(processed, "{-}", "-")
-		processed = strings.ReplaceAll(processed, "{--}", "--")
-
-		// Strip surrounding single quotes if present
-		if len(processed) >= 2 && processed[0] == '\'' && processed[len(processed)-1] == '\'' {
-			processed = processed[1 : len(processed)-1]
-		}
-
-		// Strip surrounding double quotes if present
-		if len(processed) >= 2 && processed[0] == '"' && processed[len(processed)-1] == '"' {
-			processed = processed[1 : len(processed)-1]
-		}
-
-		result[i] = processed
-	}
-
-	return result
-}
-
-func startActivityReporter(ctx context.Context, cfg *Config, log *logger.Logger) error {
-	hubClient, err := hub.NewClientFromEnv(log)
-	if err != nil {
-		return fmt.Errorf("failed to create hub client: %w", err)
-	}
-
-	// Test hub connection
-	if err := hubClient.Ping(ctx); err != nil {
-		return fmt.Errorf("failed to ping hub: %w", err)
-	}
-
-	// Start activity reporter
-	interval := 5 * time.Minute
-	_ = hubClient.StartActivityReporter(ctx, interval, cfg.ForceAlive)
-
-	log.Info("activity reporter started",
-		"interval", interval,
-		"force_alive", cfg.ForceAlive)
-
-	return nil
 }
