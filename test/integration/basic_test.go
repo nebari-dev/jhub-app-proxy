@@ -31,14 +31,14 @@ func TestBasicHTTPServer(t *testing.T) {
 	binaryPath := buildBinary(t)
 
 	// Start jhub-app-proxy
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, binaryPath,
 		"--port", fmt.Sprintf("%d", proxyPort),
 		"--destport", fmt.Sprintf("%d", destPort),
 		"--authtype", "none",
-		"--log-format", "json",
+		"--log-format", "pretty",
 		"--log-level", "info",
 		"--",
 		"python3", "-m", "http.server", "{port}",
@@ -58,7 +58,7 @@ func TestBasicHTTPServer(t *testing.T) {
 	proxyURL := fmt.Sprintf("http://127.0.0.1:%d", proxyPort)
 
 	// Wait for proxy to be ready
-	if err := waitForHTTP(proxyURL, 30*time.Second); err != nil {
+	if err := waitForHTTP(proxyURL, 5*time.Second); err != nil {
 		t.Fatalf("Proxy did not become ready: %v", err)
 	}
 
@@ -87,7 +87,7 @@ func TestBasicHTTPServer(t *testing.T) {
 	// Test 2: Verify logs API returns subprocess output
 	t.Run("LogsAPI", func(t *testing.T) {
 		// Wait for app to be running so logs are captured
-		if err := waitForAppReady(proxyURL, 60*time.Second); err != nil {
+		if err := waitForAppReady(proxyURL, 5*time.Second); err != nil {
 			t.Fatalf("App did not become ready: %v", err)
 		}
 
@@ -156,7 +156,7 @@ func TestBasicHTTPServer(t *testing.T) {
 	t.Run("ProxyToApp", func(t *testing.T) {
 		// Wait for the subprocess to be ready (health check passes)
 		// We poll the stats API to check when state becomes "running"
-		if err := waitForAppReady(proxyURL, 60*time.Second); err != nil {
+		if err := waitForAppReady(proxyURL, 5*time.Second); err != nil {
 			t.Fatalf("App did not become ready: %v", err)
 		}
 
@@ -188,9 +188,8 @@ func TestBasicHTTPServer(t *testing.T) {
 			t.Fatalf("Failed to send interrupt signal: %v", err)
 		}
 
-		// Wait for shutdown to complete (proxy waits up to 10s for subprocess)
-		// Plus some buffer time for cleanup
-		time.Sleep(12 * time.Second)
+		// Wait for shutdown to complete
+		time.Sleep(2 * time.Second)
 
 		// At this point the process should have exited
 		// We don't check explicitly as the test cleanup will handle killing if needed
