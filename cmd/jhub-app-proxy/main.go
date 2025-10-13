@@ -434,12 +434,10 @@ func run(cfg *Config) error {
 
 			// Log application URLs with separators
 			appURL := fmt.Sprintf("http://127.0.0.1:%d", proxyPort)
-			log.Info("==================================================")
 			log.Info("application ready",
 				"app_url", appURL,
 				"interim_page", fmt.Sprintf("%s%s", appURL, interimBasePath),
 				"pid", mgr.GetPID())
-			log.Info("==================================================")
 
 			// Mark app as deployed - starts grace period timer
 			// IMPORTANT: Call this AFTER Start() completes successfully,
@@ -457,12 +455,10 @@ func run(cfg *Config) error {
 
 	// Log proxy server startup with separators
 	proxyURL := fmt.Sprintf("http://127.0.0.1:%d", proxyPort)
-	log.Info("==================================================")
 	log.Info("proxy server ready",
 		"proxy_url", proxyURL,
 		"logs_api", fmt.Sprintf("%s/api/logs", proxyURL),
 		"internal_port", subprocessPort)
-	log.Info("==================================================")
 
 	// Wait for shutdown signal (context will be cancelled by signal handler)
 	<-ctx.Done()

@@ -231,9 +231,7 @@ func (l *Logger) StartupBanner(version string, config map[string]interface{}) {
 
 // ShutdownBanner logs a clear shutdown message
 func (l *Logger) ShutdownBanner(reason string) {
-	l.logger.Info("==================================================")
 	l.logger.Info("Shutting down JHub Apps Proxy", "reason", reason)
-	l.logger.Info("==================================================")
 }
 
 // HubAPICall logs JupyterHub API calls for debugging auth and activity reporting
