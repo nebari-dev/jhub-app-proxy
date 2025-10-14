@@ -7,6 +7,10 @@
 [![License](https://img.shields.io/github/license/nebari-dev/jhub-app-proxy?style=flat-square)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/nebari-dev/jhub-app-proxy?style=flat-square)](https://github.com/nebari-dev/jhub-app-proxy/releases)
 
+> **⚠️ Early Alpha Release**
+>
+> This project is in early alpha stage. While functional, the API and features may change. Use with caution in production environments and expect potential breaking changes in future releases.
+
 A lightweight app proxy for JupyterHub applications that displays real-time startup logs before forwarding traffic to your app.
 
 ![JHub Apps Proxy UI](ui-screenshot.png)
