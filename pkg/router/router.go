@@ -60,6 +60,15 @@ func (rtr *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"path", path,
 		"remote_addr", r.RemoteAddr)
 
+	// Route 0: OAuth callback (must be handled by mux where OAuth middleware is registered)
+	// This allows the OAuth flow to complete regardless of app state
+	if strings.HasSuffix(path, "/oauth_callback") {
+		rtr.log.Info("routing OAuth callback through mux",
+			"path", path)
+		rtr.mux.ServeHTTP(w, r)
+		return
+	}
+
 	// Route 1: Interim page and its API (during startup + grace period)
 	if strings.HasPrefix(path, rtr.interimBasePath) {
 		rtr.handleInterimRoute(w, r, path)

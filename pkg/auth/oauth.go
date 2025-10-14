@@ -17,18 +17,24 @@ import (
 
 // OAuthMiddleware handles JupyterHub OAuth authentication
 type OAuthMiddleware struct {
-	clientID   string
-	apiToken   string
-	apiURL     string
-	baseURL    string
-	hubHost    string
-	hubPrefix  string
-	cookieName string
-	logger     *logger.Logger
+	clientID     string
+	apiToken     string
+	apiURL       string
+	baseURL      string
+	hubHost      string
+	hubPrefix    string
+	cookieName   string
+	callbackPath string // Custom callback path (e.g., "oauth_callback" or "_temp/jhub-app-proxy/oauth_callback")
+	logger       *logger.Logger
 }
 
-// NewOAuthMiddleware creates a new OAuth middleware
+// NewOAuthMiddleware creates a new OAuth middleware with default callback path
 func NewOAuthMiddleware(log *logger.Logger) (*OAuthMiddleware, error) {
+	return NewOAuthMiddlewareWithCallbackPath(log, "oauth_callback")
+}
+
+// NewOAuthMiddlewareWithCallbackPath creates a new OAuth middleware with a custom callback path
+func NewOAuthMiddlewareWithCallbackPath(log *logger.Logger, callbackPath string) (*OAuthMiddleware, error) {
 	apiURL := os.Getenv("JUPYTERHUB_API_URL")
 	if apiURL == "" {
 		return nil, fmt.Errorf("JUPYTERHUB_API_URL not set")
@@ -62,14 +68,15 @@ func NewOAuthMiddleware(log *logger.Logger) (*OAuthMiddleware, error) {
 	}
 
 	return &OAuthMiddleware{
-		clientID:   clientID,
-		apiToken:   apiToken,
-		apiURL:     apiURL,
-		baseURL:    baseURL,
-		hubHost:    hubHost,
-		hubPrefix:  hubPrefix,
-		cookieName: clientID,
-		logger:     log.WithComponent("oauth"),
+		clientID:     clientID,
+		apiToken:     apiToken,
+		apiURL:       apiURL,
+		baseURL:      baseURL,
+		hubHost:      hubHost,
+		hubPrefix:    hubPrefix,
+		cookieName:   clientID,
+		callbackPath: callbackPath,
+		logger:       log.WithComponent("oauth"),
 	}, nil
 }
 
@@ -77,7 +84,8 @@ func NewOAuthMiddleware(log *logger.Logger) (*OAuthMiddleware, error) {
 func (m *OAuthMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Handle OAuth callback
-		if strings.HasSuffix(r.URL.Path, "/oauth_callback") {
+		// Check if the path ends with the callback path (e.g., "/oauth_callback" or "/_temp/jhub-app-proxy/oauth_callback")
+		if strings.HasSuffix(r.URL.Path, "/"+m.callbackPath) {
 			m.handleCallback(w, r)
 			return
 		}
@@ -116,6 +124,9 @@ func (m *OAuthMiddleware) redirectToLogin(w http.ResponseWriter, r *http.Request
 	rand.Read(b)
 	state := base64.URLEncoding.EncodeToString(b)
 
+	// Store original URL to redirect back after OAuth
+	originalURL := r.URL.RequestURI()
+
 	// Set state cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     m.cookieName + "-oauth-state",
@@ -127,8 +138,19 @@ func (m *OAuthMiddleware) redirectToLogin(w http.ResponseWriter, r *http.Request
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	// Build OAuth URL
-	redirectURI := m.baseURL + "oauth_callback"
+	// Set original URL cookie to redirect back after OAuth
+	http.SetCookie(w, &http.Cookie{
+		Name:     m.cookieName + "-oauth-next",
+		Value:    originalURL,
+		Path:     m.baseURL,
+		MaxAge:   600,
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	// Build OAuth URL with custom callback path
+	redirectURI := m.baseURL + m.callbackPath
 	authURL := fmt.Sprintf("%s%sapi/oauth2/authorize?client_id=%s&redirect_uri=%s&response_type=code&state=%s",
 		m.hubHost, m.hubPrefix, url.QueryEscape(m.clientID), url.QueryEscape(redirectURI), url.QueryEscape(state))
 
@@ -153,7 +175,7 @@ func (m *OAuthMiddleware) handleCallback(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Exchange code for token
-	redirectURI := m.baseURL + "oauth_callback"
+	redirectURI := m.baseURL + m.callbackPath
 	data := url.Values{}
 	data.Set("client_id", m.clientID)
 	data.Set("client_secret", m.apiToken)
@@ -204,6 +226,18 @@ func (m *OAuthMiddleware) handleCallback(w http.ResponseWriter, r *http.Request)
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	// Redirect to base URL
-	http.Redirect(w, r, m.baseURL, http.StatusFound)
+	// Redirect back to original URL if saved, otherwise to base URL
+	redirectURL := m.baseURL
+	if nextCookie, err := r.Cookie(m.cookieName + "-oauth-next"); err == nil && nextCookie.Value != "" {
+		redirectURL = nextCookie.Value
+		// Clear the next URL cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:   m.cookieName + "-oauth-next",
+			Value:  "",
+			Path:   m.baseURL,
+			MaxAge: -1,
+		})
+	}
+
+	http.Redirect(w, r, redirectURL, http.StatusFound)
 }

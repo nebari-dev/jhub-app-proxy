@@ -59,13 +59,15 @@ func New(cfg Config) (*Server, error) {
 	mux := http.NewServeMux()
 	api.Version = cfg.Version
 
-	// Create OAuth middleware if authentication is enabled for main app OR interim pages
-	var oauthMW *auth.OAuthMiddleware
+	// CRITICAL SECURITY: Determine if OAuth authentication is needed
+	// Create a single shared OAuth middleware instance for both interim and proxy
+	// This ensures state cookies are shared between redirectToLogin and handleCallback
+	var sharedOAuthMW *auth.OAuthMiddleware
 	needsOAuth := cfg.AppConfig.AuthType == "oauth" || cfg.AppConfig.InterimPageAuth
 
 	if needsOAuth {
 		var err error
-		oauthMW, err = auth.NewOAuthMiddleware(log)
+		sharedOAuthMW, err = auth.NewOAuthMiddleware(log)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OAuth middleware: %w", err)
 		}
@@ -77,16 +79,13 @@ func New(cfg Config) (*Server, error) {
 		}
 	}
 
-	// CRITICAL SECURITY: Determine if interim pages need authentication
-	// If --authtype=oauth: protect everything (app + interim pages)
-	// If --interim-page-auth: protect only interim pages (app is public)
-	// Otherwise: protect nothing
+	// Determine if interim pages need authentication
 	protectInterim := cfg.AppConfig.AuthType == "oauth" || cfg.AppConfig.InterimPageAuth
 
 	// CRITICAL SECURITY: Register logs API handler with or without authentication
 	logsHandler := api.NewLogsHandler(cfg.Manager, log)
-	if protectInterim && oauthMW != nil {
-		logsHandler.RegisterInterimRoutesWithAuth(mux, interimBasePath, oauthMW)
+	if protectInterim && sharedOAuthMW != nil {
+		logsHandler.RegisterInterimRoutesWithAuth(mux, interimBasePath, sharedOAuthMW)
 	} else {
 		logsHandler.RegisterInterimRoutes(mux, interimBasePath)
 		log.Warn("logs API NOT protected - sensitive logs exposed!", "path", interimBasePath+"/api/*")
@@ -99,13 +98,36 @@ func New(cfg Config) (*Server, error) {
 		AppURLPath: appRootPath,
 	})
 
+	// CRITICAL SECURITY: Register OAuth callback handler first (must come before other routes)
+	// The callback needs to be accessible from anywhere in the service prefix
+	if sharedOAuthMW != nil {
+		// Register OAuth callback at service prefix + /oauth_callback
+		// This allows the OAuth flow to complete regardless of where it was initiated
+		oauthCallbackPath := servicePrefix + "/oauth_callback"
+		mux.HandleFunc(oauthCallbackPath, func(w http.ResponseWriter, r *http.Request) {
+			// Use a minimal OAuth-wrapped handler that just handles the callback
+			// After callback completes, it will redirect to the original URL
+			sharedOAuthMW.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// This should never be reached - callback should redirect before getting here
+				http.Redirect(w, r, servicePrefix+"/", http.StatusFound)
+			})).ServeHTTP(w, r)
+		})
+		log.Info("OAuth callback registered", "path", oauthCallbackPath)
+	}
+
 	// CRITICAL SECURITY: Wrap interim handler with OAuth authentication if needed
 	// Interim pages can expose sensitive subprocess logs!
-	if protectInterim && oauthMW != nil {
-		mux.Handle(interimBasePath, oauthMW.Wrap(interimHandler))
+	// Register both with and without trailing slash to handle all cases:
+	// - /interim (exact path)
+	// - /interim/ (prefix pattern for sub-paths like /interim/oauth_callback)
+	if protectInterim && sharedOAuthMW != nil {
+		wrappedHandler := sharedOAuthMW.Wrap(interimHandler)
+		mux.Handle(interimBasePath, wrappedHandler)   // Exact path
+		mux.Handle(interimBasePath+"/", wrappedHandler) // Prefix pattern
 		log.Info("interim page protected with OAuth authentication", "path", interimBasePath)
 	} else {
-		mux.Handle(interimBasePath, interimHandler)
+		mux.Handle(interimBasePath, interimHandler)   // Exact path
+		mux.Handle(interimBasePath+"/", interimHandler) // Prefix pattern
 		log.Warn("interim page NOT protected - sensitive logs exposed!", "path", interimBasePath)
 	}
 
