@@ -2,7 +2,6 @@
 package api
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -206,26 +205,19 @@ func (h *LogsHandler) HandleGetAllLogs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleGetLogo returns the logo as base64-encoded PNG
-// GET /api/logo
+// HandleGetLogo returns the logo PNG file
+// GET /static/logo.png
 func (h *LogsHandler) HandleGetLogo(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	logoBase64 := base64.StdEncoding.EncodeToString(ui.LogoPNG)
-
-	response := map[string]interface{}{
-		"logo": logoBase64,
-		"type": "image/png",
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		h.logger.Error("failed to encode logo response", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=3600") // Cache for 1 hour
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		w.Write(ui.LogoPNG)
 	}
 }
 
@@ -268,7 +260,6 @@ func (h *LogsHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/logs/since", h.HandleGetLogsSince)
 	mux.HandleFunc("/api/logs/stats", h.HandleGetStats)
 	mux.HandleFunc("/api/logs/clear", h.HandleClearLogs)
-	mux.HandleFunc("/api/logo", h.HandleGetLogo)
 
 	h.logger.Info("log API routes registered",
 		"endpoints", []string{
@@ -277,7 +268,6 @@ func (h *LogsHandler) RegisterRoutes(mux *http.ServeMux) {
 			"GET /api/logs/since",
 			"GET /api/logs/stats",
 			"DELETE /api/logs/clear",
-			"GET /api/logo",
 		})
 }
 
@@ -290,7 +280,6 @@ func (h *LogsHandler) RegisterRoutesWithPrefix(mux *http.ServeMux, prefix string
 	mux.HandleFunc(prefix+"/api/logs/since", h.HandleGetLogsSince)
 	mux.HandleFunc(prefix+"/api/logs/stats", h.HandleGetStats)
 	mux.HandleFunc(prefix+"/api/logs/clear", h.HandleClearLogs)
-	mux.HandleFunc(prefix+"/api/logo", h.HandleGetLogo)
 
 	h.logger.Info("log API routes registered with prefix",
 		"prefix", prefix,
@@ -300,7 +289,6 @@ func (h *LogsHandler) RegisterRoutesWithPrefix(mux *http.ServeMux, prefix string
 			"GET " + prefix + "/api/logs/since",
 			"GET " + prefix + "/api/logs/stats",
 			"DELETE " + prefix + "/api/logs/clear",
-			"GET " + prefix + "/api/logo",
 		})
 }
 
@@ -324,7 +312,7 @@ func (h *LogsHandler) RegisterInterimRoutes(mux *http.ServeMux, basePath string)
 	mux.HandleFunc(basePath+"/api/logs/since", h.HandleGetLogsSince)
 	mux.HandleFunc(basePath+"/api/logs/stats", h.HandleGetStats)
 	mux.HandleFunc(basePath+"/api/logs/clear", h.HandleClearLogs)
-	mux.HandleFunc(basePath+"/api/logo", h.HandleGetLogo)
+	mux.HandleFunc(basePath+"/static/logo.png", h.HandleGetLogo)
 	mux.HandleFunc(basePath+"/static/logs.css", h.HandleGetCSS)
 	mux.HandleFunc(basePath+"/static/logs.js", h.HandleGetJS)
 
@@ -336,7 +324,7 @@ func (h *LogsHandler) RegisterInterimRoutes(mux *http.ServeMux, basePath string)
 			"GET " + basePath + "/api/logs/since",
 			"GET " + basePath + "/api/logs/stats",
 			"DELETE " + basePath + "/api/logs/clear",
-			"GET " + basePath + "/api/logo",
+			"GET " + basePath + "/static/logo.png",
 			"GET " + basePath + "/static/logs.css",
 			"GET " + basePath + "/static/logs.js",
 		})
@@ -358,9 +346,9 @@ func (h *LogsHandler) RegisterInterimRoutesWithAuth(mux *http.ServeMux, basePath
 	mux.Handle(basePath+"/api/logs/since", oauthMW.Wrap(http.HandlerFunc(h.HandleGetLogsSince)))
 	mux.Handle(basePath+"/api/logs/stats", oauthMW.Wrap(http.HandlerFunc(h.HandleGetStats)))
 	mux.Handle(basePath+"/api/logs/clear", oauthMW.Wrap(http.HandlerFunc(h.HandleClearLogs)))
-	mux.Handle(basePath+"/api/logo", oauthMW.Wrap(http.HandlerFunc(h.HandleGetLogo)))
 
-	// Static assets are not protected - they're just CSS/JS files
+	// Static assets are not protected - they're just CSS/JS/image files
+	mux.HandleFunc(basePath+"/static/logo.png", h.HandleGetLogo)
 	mux.HandleFunc(basePath+"/static/logs.css", h.HandleGetCSS)
 	mux.HandleFunc(basePath+"/static/logs.js", h.HandleGetJS)
 
@@ -372,7 +360,7 @@ func (h *LogsHandler) RegisterInterimRoutesWithAuth(mux *http.ServeMux, basePath
 			"GET " + basePath + "/api/logs/since",
 			"GET " + basePath + "/api/logs/stats",
 			"DELETE " + basePath + "/api/logs/clear",
-			"GET " + basePath + "/api/logo",
+			"GET " + basePath + "/static/logo.png",
 			"GET " + basePath + "/static/logs.css",
 			"GET " + basePath + "/static/logs.js",
 		})

@@ -5,6 +5,7 @@ const commandText = document.getElementById('commandText');
 const versionText = document.getElementById('versionText');
 const logo = document.getElementById('logo');
 const autoScrollToggle = document.getElementById('autoScrollToggle');
+const elapsedTime = document.getElementById('elapsedTime');
 
 let isReady = false;
 let lastLogCount = 0;
@@ -36,26 +37,10 @@ autoScrollToggle.addEventListener('click', function() {
 // Load logo
 async function loadLogo() {
     try {
-        const response = await fetch(apiBase + '/logo');
-
-        // Silently fail if authentication fails
-        if (response.status === 403 || response.status === 401 || !response.ok) {
-            return false;
-        }
-
-        // Check if response is JSON (OAuth redirect returns HTML with 200 OK)
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            return false;
-        }
-
-        const data = await response.json();
-        if (data.logo) {
-            logo.src = 'data:' + data.type + ';base64,' + data.logo;
-            logo.style.display = 'block'; // Show logo only after successful load
-            logoLoaded = true;
-            return true;
-        }
+        logo.src = basePath + '/static/logo.png';
+        logo.style.display = 'block'; // Show logo
+        logoLoaded = true;
+        return true;
     } catch (err) {
         console.error('Failed to load logo:', err);
     }
@@ -65,6 +50,22 @@ async function loadLogo() {
 function scrollToBottom() {
     if (autoScrollEnabled) {
         logsContainer.scrollTop = logsContainer.scrollHeight;
+    }
+}
+
+function formatElapsedTime(seconds) {
+    if (!seconds || seconds < 0) {
+        return '(0:00)';
+    }
+
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (hours > 0) {
+        return `(${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')})`;
+    } else {
+        return `(${minutes}:${String(secs).padStart(2, '0')})`;
     }
 }
 
@@ -145,6 +146,11 @@ async function checkAppStatus() {
 
         if (data.process_state) {
             const state = data.process_state.state;
+
+            // Update elapsed time (show even if uptime is 0)
+            if (data.process_state.uptime !== undefined) {
+                elapsedTime.textContent = formatElapsedTime(data.process_state.uptime);
+            }
 
             if (state === 'running' && !isReady) {
                 isReady = true;
