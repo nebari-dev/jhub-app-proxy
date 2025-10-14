@@ -13,6 +13,8 @@
 
 A lightweight app proxy for JupyterHub applications that displays real-time startup logs before forwarding traffic to your app.
 
+**Note:** This project is the successor to [jhsingle-native-proxy](https://github.com/ideonate/jhsingle-native-proxy), rewritten in Go for improved portability, observability, and maintainability.
+
 ![JHub Apps Proxy UI](ui-screenshot.png)
 
 ## Features
