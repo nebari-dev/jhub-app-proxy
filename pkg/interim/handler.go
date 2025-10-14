@@ -40,21 +40,24 @@ type Handler struct {
 	mu              sync.RWMutex
 	deploymentTime  time.Time
 	appURLPath      string // The path to redirect to after app is ready (e.g., "/" or "/user/admin/app/")
+	interimBasePath string // The full interim path including service prefix (e.g., "/user/alice/custom/_temp/jhub-app-proxy")
 }
 
 // Config contains configuration for the interim handler
 type Config struct {
-	Manager    *process.ManagerWithLogs
-	Logger     *logger.Logger
-	AppURLPath string // Path to redirect to (e.g., "/" or "/user/admin/app/")
+	Manager         *process.ManagerWithLogs
+	Logger          *logger.Logger
+	AppURLPath      string // Path to redirect to (e.g., "/" or "/user/admin/app/")
+	InterimBasePath string // Full interim path including service prefix (e.g., "/user/alice/custom/_temp/jhub-app-proxy")
 }
 
 // NewHandler creates a new interim page handler
 func NewHandler(cfg Config) *Handler {
 	return &Handler{
-		manager:    cfg.Manager,
-		logger:     cfg.Logger.WithComponent("interim-handler"),
-		appURLPath: cfg.AppURLPath,
+		manager:         cfg.Manager,
+		logger:          cfg.Logger.WithComponent("interim-handler"),
+		appURLPath:      cfg.AppURLPath,
+		interimBasePath: cfg.InterimBasePath,
 	}
 }
 
@@ -71,17 +74,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serve the interim log viewer page with injected redirect URL
+	// Serve the interim log viewer page with injected redirect URL and base path
+	// Use the configured interim base path which includes the service prefix
+	// e.g., "/user/alice/custom/_temp/jhub-app-proxy"
+	basePath := h.interimBasePath
+
 	h.logger.Info("serving interim page",
 		"request_path", r.URL.Path,
+		"base_path", basePath,
 		"app_url", h.appURLPath)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.WriteHeader(http.StatusOK)
 
-	// Inject the app URL into the HTML via a meta tag that JavaScript can read
+	// Inject both the app URL and base path into the HTML via meta tags that JavaScript can read
 	html := strings.Replace(ui.LogsHTML, "<title>",
-		fmt.Sprintf("<meta name=\"app-redirect-url\" content=\"%s\">\n    <title>", h.appURLPath), 1)
+		fmt.Sprintf("<meta name=\"app-redirect-url\" content=\"%s\">\n    <meta name=\"base-path\" content=\"%s\">\n    <title>",
+			h.appURLPath, basePath), 1)
 	fmt.Fprint(w, html)
 }
 

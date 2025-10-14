@@ -67,6 +67,7 @@ func New(cfg Config) (*Server, error) {
 
 	if needsOAuth {
 		var err error
+		// Use default oauth_callback path (JupyterHub only accepts this for services)
 		sharedOAuthMW, err = auth.NewOAuthMiddleware(log)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OAuth middleware: %w", err)
@@ -93,17 +94,18 @@ func New(cfg Config) (*Server, error) {
 
 	// Create interim page handler
 	interimHandler := interim.NewHandler(interim.Config{
-		Manager:    cfg.Manager,
-		Logger:     log,
-		AppURLPath: appRootPath,
+		Manager:         cfg.Manager,
+		Logger:          log,
+		AppURLPath:      appRootPath,
+		InterimBasePath: interimBasePath,
 	})
 
-	// CRITICAL SECURITY: Register OAuth callback handler first (must come before other routes)
-	// The callback needs to be accessible from anywhere in the service prefix
+	// CRITICAL SECURITY: Register OAuth callback handler at servicePrefix/oauth_callback
+	// NOTE: This will collide with backend app OAuth callbacks (e.g., JupyterLab)
+	// The router will need to conditionally route this based on whether OAuth is enabled
+	var oauthCallbackPath string
 	if sharedOAuthMW != nil {
-		// Register OAuth callback at service prefix + /oauth_callback
-		// This allows the OAuth flow to complete regardless of where it was initiated
-		oauthCallbackPath := servicePrefix + "/oauth_callback"
+		oauthCallbackPath = servicePrefix + "/oauth_callback"
 		mux.HandleFunc(oauthCallbackPath, func(w http.ResponseWriter, r *http.Request) {
 			// Use a minimal OAuth-wrapped handler that just handles the callback
 			// After callback completes, it will redirect to the original URL
@@ -117,17 +119,13 @@ func New(cfg Config) (*Server, error) {
 
 	// CRITICAL SECURITY: Wrap interim handler with OAuth authentication if needed
 	// Interim pages can expose sensitive subprocess logs!
-	// Register both with and without trailing slash to handle all cases:
-	// - /interim (exact path)
-	// - /interim/ (prefix pattern for sub-paths like /interim/oauth_callback)
+	// Register only the exact path - sub-routes (API, static files) are registered separately
 	if protectInterim && sharedOAuthMW != nil {
 		wrappedHandler := sharedOAuthMW.Wrap(interimHandler)
-		mux.Handle(interimBasePath, wrappedHandler)   // Exact path
-		mux.Handle(interimBasePath+"/", wrappedHandler) // Prefix pattern
+		mux.Handle(interimBasePath, wrappedHandler)   // Exact path only
 		log.Info("interim page protected with OAuth authentication", "path", interimBasePath)
 	} else {
-		mux.Handle(interimBasePath, interimHandler)   // Exact path
-		mux.Handle(interimBasePath+"/", interimHandler) // Prefix pattern
+		mux.Handle(interimBasePath, interimHandler)   // Exact path only
 		log.Warn("interim page NOT protected - sensitive logs exposed!", "path", interimBasePath)
 	}
 
@@ -147,15 +145,16 @@ func New(cfg Config) (*Server, error) {
 
 	// Create main router
 	mainRouter := router.New(router.Config{
-		Logger:          log,
-		Mux:             mux,
-		InterimHandler:  interimHandler,
-		ProxyHandler:    proxyHandler,
-		Manager:         cfg.Manager,
-		ServicePrefix:   servicePrefix,
-		InterimBasePath: interimBasePath,
-		AppRootPath:     appRootPath,
-		SubprocessURL:   cfg.SubprocessURL,
+		Logger:            log,
+		Mux:               mux,
+		InterimHandler:    interimHandler,
+		ProxyHandler:      proxyHandler,
+		Manager:           cfg.Manager,
+		ServicePrefix:     servicePrefix,
+		InterimBasePath:   interimBasePath,
+		AppRootPath:       appRootPath,
+		SubprocessURL:     cfg.SubprocessURL,
+		OAuthCallbackPath: oauthCallbackPath, // Empty if OAuth disabled
 	})
 
 	// Create HTTP server

@@ -13,42 +13,45 @@ import (
 
 // Router handles intelligent routing between interim page, logs API, and backend application
 type Router struct {
-	log             *logger.Logger
-	mux             *http.ServeMux
-	interimHandler  *interim.Handler
-	proxyHandler    *proxy.Handler
-	mgr             *process.ManagerWithLogs
-	servicePrefix   string
-	interimBasePath string
-	appRootPath     string
-	subprocessURL   string
+	log               *logger.Logger
+	mux               *http.ServeMux
+	interimHandler    *interim.Handler
+	proxyHandler      *proxy.Handler
+	mgr               *process.ManagerWithLogs
+	servicePrefix     string
+	interimBasePath   string
+	appRootPath       string
+	subprocessURL     string
+	oauthCallbackPath string // Empty if OAuth disabled for jhub-app-proxy
 }
 
 // Config contains configuration for the router
 type Config struct {
-	Logger          *logger.Logger
-	Mux             *http.ServeMux
-	InterimHandler  *interim.Handler
-	ProxyHandler    *proxy.Handler
-	Manager         *process.ManagerWithLogs
-	ServicePrefix   string
-	InterimBasePath string
-	AppRootPath     string
-	SubprocessURL   string
+	Logger            *logger.Logger
+	Mux               *http.ServeMux
+	InterimHandler    *interim.Handler
+	ProxyHandler      *proxy.Handler
+	Manager           *process.ManagerWithLogs
+	ServicePrefix     string
+	InterimBasePath   string
+	AppRootPath       string
+	SubprocessURL     string
+	OAuthCallbackPath string // Empty if OAuth disabled for jhub-app-proxy
 }
 
 // New creates a new router with the given configuration
 func New(cfg Config) *Router {
 	return &Router{
-		log:             cfg.Logger,
-		mux:             cfg.Mux,
-		interimHandler:  cfg.InterimHandler,
-		proxyHandler:    cfg.ProxyHandler,
-		mgr:             cfg.Manager,
-		servicePrefix:   cfg.ServicePrefix,
-		interimBasePath: cfg.InterimBasePath,
-		appRootPath:     cfg.AppRootPath,
-		subprocessURL:   cfg.SubprocessURL,
+		log:               cfg.Logger,
+		mux:               cfg.Mux,
+		interimHandler:    cfg.InterimHandler,
+		proxyHandler:      cfg.ProxyHandler,
+		mgr:               cfg.Manager,
+		servicePrefix:     cfg.ServicePrefix,
+		interimBasePath:   cfg.InterimBasePath,
+		appRootPath:       cfg.AppRootPath,
+		subprocessURL:     cfg.SubprocessURL,
+		oauthCallbackPath: cfg.OAuthCallbackPath,
 	}
 }
 
@@ -60,13 +63,22 @@ func (rtr *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"path", path,
 		"remote_addr", r.RemoteAddr)
 
-	// Route 0: OAuth callback (must be handled by mux where OAuth middleware is registered)
-	// This allows the OAuth flow to complete regardless of app state
-	if strings.HasSuffix(path, "/oauth_callback") {
-		rtr.log.Info("routing OAuth callback through mux",
+	// Route 0: OAuth callback for jhub-app-proxy (only when OAuth is enabled)
+	// CRITICAL: Only intercept if OAuth is enabled AND app is not running
+	// This ensures the callback is always routed to the backend app when it's running, its
+	// specially useful when the backend app also uses OAuth (e.g., JupyterLab), and we don't
+	// want to interfere with its OAuth flow.
+	// When app is running, proxy the callback to the backend app (e.g., JupyterLab)
+	if rtr.oauthCallbackPath != "" && path == rtr.oauthCallbackPath {
+		if !rtr.mgr.IsRunning() {
+			rtr.log.Info("routing OAuth callback to jhub-app-proxy (app not running)",
+				"path", path)
+			rtr.mux.ServeHTTP(w, r)
+			return
+		}
+		rtr.log.Info("proxying OAuth callback to backend app (app running)",
 			"path", path)
-		rtr.mux.ServeHTTP(w, r)
-		return
+		// Fall through to proxy
 	}
 
 	// Route 1: Interim page and its API (during startup + grace period)

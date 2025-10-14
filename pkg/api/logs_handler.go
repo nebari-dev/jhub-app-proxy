@@ -229,6 +229,38 @@ func (h *LogsHandler) HandleGetLogo(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HandleGetCSS returns the logs page CSS
+// GET /static/logs.css
+func (h *LogsHandler) HandleGetCSS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600") // Cache for 1 hour
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		w.Write([]byte(ui.LogsCSS))
+	}
+}
+
+// HandleGetJS returns the logs page JavaScript
+// GET /static/logs.js
+func (h *LogsHandler) HandleGetJS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600") // Cache for 1 hour
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		w.Write([]byte(ui.LogsJS))
+	}
+}
+
 // RegisterRoutes registers all log API routes with a http.ServeMux
 func (h *LogsHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/logs", h.HandleGetLogs)
@@ -293,6 +325,8 @@ func (h *LogsHandler) RegisterInterimRoutes(mux *http.ServeMux, basePath string)
 	mux.HandleFunc(basePath+"/api/logs/stats", h.HandleGetStats)
 	mux.HandleFunc(basePath+"/api/logs/clear", h.HandleClearLogs)
 	mux.HandleFunc(basePath+"/api/logo", h.HandleGetLogo)
+	mux.HandleFunc(basePath+"/static/logs.css", h.HandleGetCSS)
+	mux.HandleFunc(basePath+"/static/logs.js", h.HandleGetJS)
 
 	h.logger.Info("interim log API routes registered",
 		"base_path", basePath,
@@ -303,24 +337,32 @@ func (h *LogsHandler) RegisterInterimRoutes(mux *http.ServeMux, basePath string)
 			"GET " + basePath + "/api/logs/stats",
 			"DELETE " + basePath + "/api/logs/clear",
 			"GET " + basePath + "/api/logo",
+			"GET " + basePath + "/static/logs.css",
+			"GET " + basePath + "/static/logs.js",
 		})
 }
 
 // RegisterInterimRoutesWithAuth registers all log API routes under the interim path with OAuth authentication
 // CRITICAL SECURITY: Use this method instead of RegisterInterimRoutes when OAuth is enabled!
 //
+// Note: Static assets (CSS, JS) are not protected by OAuth as they're just static files needed to render the page.
+//
 // Parameters:
 //   - mux: The HTTP request multiplexer
 //   - basePath: The base interim path
 //   - oauthMW: OAuth middleware for authentication
 func (h *LogsHandler) RegisterInterimRoutesWithAuth(mux *http.ServeMux, basePath string, oauthMW *auth.OAuthMiddleware) {
-	// Wrap each handler with OAuth middleware
+	// Wrap each API handler with OAuth middleware
 	mux.Handle(basePath+"/api/logs", oauthMW.Wrap(http.HandlerFunc(h.HandleGetLogs)))
 	mux.Handle(basePath+"/api/logs/all", oauthMW.Wrap(http.HandlerFunc(h.HandleGetAllLogs)))
 	mux.Handle(basePath+"/api/logs/since", oauthMW.Wrap(http.HandlerFunc(h.HandleGetLogsSince)))
 	mux.Handle(basePath+"/api/logs/stats", oauthMW.Wrap(http.HandlerFunc(h.HandleGetStats)))
 	mux.Handle(basePath+"/api/logs/clear", oauthMW.Wrap(http.HandlerFunc(h.HandleClearLogs)))
 	mux.Handle(basePath+"/api/logo", oauthMW.Wrap(http.HandlerFunc(h.HandleGetLogo)))
+
+	// Static assets are not protected - they're just CSS/JS files
+	mux.HandleFunc(basePath+"/static/logs.css", h.HandleGetCSS)
+	mux.HandleFunc(basePath+"/static/logs.js", h.HandleGetJS)
 
 	h.logger.Info("interim log API routes registered WITH OAUTH PROTECTION",
 		"base_path", basePath,
@@ -331,5 +373,7 @@ func (h *LogsHandler) RegisterInterimRoutesWithAuth(mux *http.ServeMux, basePath
 			"GET " + basePath + "/api/logs/stats",
 			"DELETE " + basePath + "/api/logs/clear",
 			"GET " + basePath + "/api/logo",
+			"GET " + basePath + "/static/logs.css",
+			"GET " + basePath + "/static/logs.js",
 		})
 }
