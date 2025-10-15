@@ -49,11 +49,13 @@ func TestOAuthCallbackForInterimPages(t *testing.T) {
 	)
 
 	// Set JupyterHub environment variables pointing to mock server
+	// Note: JUPYTERHUB_BASE_URL is the deployment base, NOT the Hub's base.
+	// JupyterHub strips "/hub" from hub.base_url when setting this env var.
 	cmd.Env = append(os.Environ(),
 		"JUPYTERHUB_API_TOKEN=test-token-12345",
 		"JUPYTERHUB_API_URL="+hubURL+"/hub/api",
 		"JUPYTERHUB_HOST="+hubURL,
-		"JUPYTERHUB_BASE_URL=/hub/",
+		"JUPYTERHUB_BASE_URL=/",
 		"JUPYTERHUB_USER=testuser",
 		"JUPYTERHUB_SERVICE_PREFIX=/user/testuser/",
 		"JUPYTERHUB_CLIENT_ID=jupyterhub-user-testuser",

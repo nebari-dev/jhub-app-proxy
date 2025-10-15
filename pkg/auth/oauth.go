@@ -59,13 +59,21 @@ func NewOAuthMiddlewareWithCallbackPath(log *logger.Logger, callbackPath string)
 	}
 
 	hubHost := os.Getenv("JUPYTERHUB_HOST")
-	hubPrefix := os.Getenv("JUPYTERHUB_BASE_URL")
-	if hubPrefix == "" {
-		hubPrefix = "/hub/"
+
+	// JUPYTERHUB_BASE_URL is the base URL of the deployment (e.g., "/" or "/jupyter/")
+	// NOT the Hub's base URL. JupyterHub strips "/hub" from the Hub's base_url
+	// when setting this env var. We need to append "hub/" to get the Hub's base path,
+	// just like JupyterHub's HubOAuth class does.
+	deploymentBase := os.Getenv("JUPYTERHUB_BASE_URL")
+	if deploymentBase == "" {
+		deploymentBase = "/"
 	}
-	if !strings.HasSuffix(hubPrefix, "/") {
-		hubPrefix += "/"
+	if !strings.HasSuffix(deploymentBase, "/") {
+		deploymentBase += "/"
 	}
+
+	// Construct the Hub's base path by appending "hub/" to the deployment base
+	hubPrefix := deploymentBase + "hub/"
 
 	return &OAuthMiddleware{
 		clientID:     clientID,
