@@ -7,7 +7,12 @@ set -e
 # Configuration
 REPO="nebari-dev/jhub-app-proxy"
 BINARY_NAME="jhub-app-proxy"
-DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
+# Use /tmp if HOME is not writable (common in containers)
+if [ -w "${HOME}" ] && [ "${HOME}" != "/" ]; then
+    DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
+else
+    DEFAULT_INSTALL_DIR="/tmp/.local/bin"
+fi
 
 # Default values
 VERSION=""
