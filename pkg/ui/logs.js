@@ -139,7 +139,7 @@ async function checkAppStatus() {
         }
 
         if (data.version) {
-            versionText.textContent = 'jhub-app-proxy v' + data.version;
+            versionText.textContent = 'jhub-app-proxy ' + data.version;
         } else {
             versionText.textContent = 'jhub-app-proxy';
         }

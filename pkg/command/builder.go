@@ -12,7 +12,8 @@ import (
 
 // Builder helps construct and manipulate commands for subprocess execution
 type Builder struct {
-	logger *logger.Logger
+	logger         *logger.Logger
+	condaWarning   string // Stores conda activation warning if any
 }
 
 // NewBuilder creates a new command builder
@@ -31,14 +32,27 @@ func (b *Builder) Build(command []string, condaEnv string) ([]string, error) {
 	// Apply conda activation if specified
 	if condaEnv != "" {
 		condaMgr := conda.NewManager(b.logger)
-		var err error
-		command, err = condaMgr.BuildActivationCommand(condaEnv, command)
+		activatedCommand, err := condaMgr.BuildActivationCommand(condaEnv, command)
 		if err != nil {
-			return nil, fmt.Errorf("failed to build conda activation: %w", err)
+			// Store warning message for later display in interim UI
+			b.condaWarning = fmt.Sprintf("WARNING: Conda environment activation failed: %s. Running command without conda activation.", err.Error())
+
+			// Log warning but continue with original command without conda activation
+			b.logger.Warn("conda environment activation failed, running command without conda activation",
+				"conda_env", condaEnv,
+				"error", err.Error())
+			// Return original command without conda activation
+			return command, nil
 		}
+		command = activatedCommand
 	}
 
 	return command, nil
+}
+
+// GetCondaWarning returns the conda activation warning message if any
+func (b *Builder) GetCondaWarning() string {
+	return b.condaWarning
 }
 
 // SubstitutePort replaces jhsingle-native-proxy style placeholders in command arguments

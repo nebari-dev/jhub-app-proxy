@@ -135,6 +135,12 @@ func run(cfg *config.Config) error {
 		return fmt.Errorf("failed to create process manager: %w", err)
 	}
 
+	// Add conda warning to log buffer if there was a conda activation failure
+	// This ensures the warning appears in the interim UI logs
+	if condaWarning := cmdBuilder.GetCondaWarning(); condaWarning != "" {
+		mgr.AddErrorLog(condaWarning)
+	}
+
 	// Create and start HTTP server
 	subprocessURL := fmt.Sprintf("http://127.0.0.1:%d", subprocessPort)
 	srv, err := server.New(server.Config{
