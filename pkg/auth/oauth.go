@@ -24,6 +24,7 @@ type OAuthMiddleware struct {
 	hubHost      string
 	hubPrefix    string
 	cookieName   string
+	headerName   string
 	callbackPath string // Custom callback path (e.g., "oauth_callback" or "_temp/jhub-app-proxy/oauth_callback")
 	logger       *logger.Logger
 }
@@ -83,6 +84,7 @@ func NewOAuthMiddlewareWithCallbackPath(log *logger.Logger, callbackPath string)
 		hubHost:      hubHost,
 		hubPrefix:    hubPrefix,
 		cookieName:   clientID,
+		headerName:   "X-Jupyterhub-Api-Token",
 		callbackPath: callbackPath,
 		logger:       log.WithComponent("oauth"),
 	}, nil
@@ -98,14 +100,16 @@ func (m *OAuthMiddleware) Wrap(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check for token in cookie
+		header := r.Header.Get(m.headerName)
+		if m.validateToken(header) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		cookie, err := r.Cookie(m.cookieName)
-		if err == nil && cookie.Value != "" {
-			// Validate token (you could add caching here if needed)
-			if m.validateToken(cookie.Value) {
-				next.ServeHTTP(w, r)
-				return
-			}
+		if err == nil && m.validateToken(cookie.Value) {
+			next.ServeHTTP(w, r)
+			return
 		}
 
 		// No valid token, redirect to OAuth
