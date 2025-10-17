@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -101,8 +102,13 @@ func (m *OAuthMiddleware) Wrap(next http.Handler) http.Handler {
 		// Check for token in cookie
 		cookie, err := r.Cookie(m.cookieName)
 		if err == nil && cookie.Value != "" {
-			// Validate token (you could add caching here if needed)
-			if m.validateToken(cookie.Value) {
+			if user, err := m.getUser(cookie.Value); err == nil {
+				pr := new(http.Request)
+				*pr = *r
+
+				u, _ := json.Marshal(user)
+				pr.Header.Set("X-Forwarded-User-Data", string(u))
+
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -113,17 +119,37 @@ func (m *OAuthMiddleware) Wrap(next http.Handler) http.Handler {
 	})
 }
 
-func (m *OAuthMiddleware) validateToken(token string) bool {
-	req, _ := http.NewRequest("GET", m.apiURL+"/user", nil)
+type User struct {
+	Name   string   `json:"name"`
+	Admin  bool     `json:"admin"`
+	Roles  []string `json:"roles"`
+	Groups []string `json:"groups"`
+	Scopes []string `json:"scopes"`
+}
+
+func (m *OAuthMiddleware) getUser(token string) (*User, error) {
+	req, err := http.NewRequest("GET", m.apiURL+"/user", nil)
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("Authorization", "token "+token)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return false
+		return nil, err
 	}
 	defer resp.Body.Close()
 
-	return resp.StatusCode == http.StatusOK
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request to %s returned status %d", req.URL.String(), resp.StatusCode)
+	}
+
+	var u User
+	if err := json.NewDecoder(resp.Body).Decode(&u); err != nil {
+		return nil, err
+	}
+
+	return &u, nil
 }
 
 func (m *OAuthMiddleware) redirectToLogin(w http.ResponseWriter, r *http.Request) {
