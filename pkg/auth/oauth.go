@@ -24,6 +24,7 @@ type OAuthMiddleware struct {
 	hubHost      string
 	hubPrefix    string
 	cookieName   string
+	headerName   string
 	callbackPath string // Custom callback path (e.g., "oauth_callback" or "_temp/jhub-app-proxy/oauth_callback")
 	logger       *logger.Logger
 }
@@ -83,6 +84,7 @@ func NewOAuthMiddlewareWithCallbackPath(log *logger.Logger, callbackPath string)
 		hubHost:      hubHost,
 		hubPrefix:    hubPrefix,
 		cookieName:   clientID,
+		headerName:   "X-Jupyterhub-Api-Token",
 		callbackPath: callbackPath,
 		logger:       log.WithComponent("oauth"),
 	}, nil
@@ -98,19 +100,33 @@ func (m *OAuthMiddleware) Wrap(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check for token in cookie
-		cookie, err := r.Cookie(m.cookieName)
-		if err == nil && cookie.Value != "" {
-			if user, err := m.getUser(cookie.Value); err == nil {
-				pr := new(http.Request)
-				*pr = *r
-
-				u, _ := json.Marshal(user)
-				pr.Header.Set("X-Forwarded-User-Data", string(u))
-
-				next.ServeHTTP(w, r)
-				return
+		maybeProxy := func(token string) bool {
+			if token == "" {
+				return false
 			}
+
+			user, err := m.getUser(token)
+			if err != nil {
+				return false
+			}
+
+			pr := new(http.Request)
+			*pr = *r
+
+			userData, _ := json.Marshal(user)
+			pr.Header.Set("X-Forwarded-User-Data", string(userData))
+
+			next.ServeHTTP(w, r)
+			return true
+		}
+
+		if maybeProxy(r.Header.Get(m.headerName)) {
+			return
+		}
+
+		cookie, err := r.Cookie(m.cookieName)
+		if err == nil && maybeProxy(cookie.Value) {
+			return
 		}
 
 		// No valid token, redirect to OAuth
