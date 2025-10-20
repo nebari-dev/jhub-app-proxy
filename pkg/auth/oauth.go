@@ -116,7 +116,7 @@ func (m *OAuthMiddleware) Wrap(next http.Handler) http.Handler {
 			userData, _ := json.Marshal(user)
 			pr.Header.Set("X-Forwarded-User-Data", string(userData))
 
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, pr)
 			return true
 		}
 
