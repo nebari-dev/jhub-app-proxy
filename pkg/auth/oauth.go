@@ -100,15 +100,32 @@ func (m *OAuthMiddleware) Wrap(next http.Handler) http.Handler {
 			return
 		}
 
-		header := r.Header.Get(m.headerName)
-		if m.validateToken(header) {
-			next.ServeHTTP(w, r)
+		maybeProxy := func(token string) bool {
+			if token == "" {
+				return false
+			}
+
+			user, err := m.getUser(token)
+			if err != nil {
+				return false
+			}
+
+			pr := new(http.Request)
+			*pr = *r
+
+			userData, _ := json.Marshal(user)
+			pr.Header.Set("X-Forwarded-User-Data", string(userData))
+
+			next.ServeHTTP(w, pr)
+			return true
+		}
+
+		if maybeProxy(r.Header.Get(m.headerName)) {
 			return
 		}
 
 		cookie, err := r.Cookie(m.cookieName)
-		if err == nil && m.validateToken(cookie.Value) {
-			next.ServeHTTP(w, r)
+		if err == nil && maybeProxy(cookie.Value) {
 			return
 		}
 
@@ -117,17 +134,37 @@ func (m *OAuthMiddleware) Wrap(next http.Handler) http.Handler {
 	})
 }
 
-func (m *OAuthMiddleware) validateToken(token string) bool {
-	req, _ := http.NewRequest("GET", m.apiURL+"/user", nil)
+type User struct {
+	Name   string   `json:"name"`
+	Admin  bool     `json:"admin"`
+	Roles  []string `json:"roles"`
+	Groups []string `json:"groups"`
+	Scopes []string `json:"scopes"`
+}
+
+func (m *OAuthMiddleware) getUser(token string) (*User, error) {
+	req, err := http.NewRequest("GET", m.apiURL+"/user", nil)
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("Authorization", "token "+token)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return false
+		return nil, err
 	}
 	defer resp.Body.Close()
 
-	return resp.StatusCode == http.StatusOK
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request to %s returned status %d", req.URL.String(), resp.StatusCode)
+	}
+
+	var u User
+	if err := json.NewDecoder(resp.Body).Decode(&u); err != nil {
+		return nil, err
+	}
+
+	return &u, nil
 }
 
 func (m *OAuthMiddleware) redirectToLogin(w http.ResponseWriter, r *http.Request) {
