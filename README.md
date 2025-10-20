@@ -106,6 +106,32 @@ jhub-app-proxy --port 8000 --destport 8050 --authtype none --log-format pretty \
 - `--destport` - Internal subprocess port (0 = random, default: 0)
 - `--authtype` - Authentication type: `oauth`, `none` (default: `oauth`)
 
+### Template Substitution
+
+JHub Apps Proxy supports template placeholders in your application commands that are automatically replaced at runtime:
+
+#### Port Templating
+Use `{port}` in your command and it will be replaced with the actual port allocated for internal routing:
+
+```bash
+jhub-app-proxy --port 8000 --destport 8501 --authtype none \
+  -- streamlit run app.py --server.port {port}
+```
+
+#### Root Path Templating
+Use `{root_path}` when your application needs to know its deployment prefix. This is especially useful when apps are deployed at dynamic URLs that aren't known in advance.
+
+The `{root_path}` placeholder is automatically replaced with the appropriate path constructed from the `JUPYTERHUB_SERVICE_PREFIX` environment variable (prepended with `/hub`).
+
+**Example:** If `JUPYTERHUB_SERVICE_PREFIX=/user/alice@example.com/myapp/`, then `{root_path}` becomes `/hub/user/alice@example.com/myapp`
+
+```bash
+jhub-app-proxy --port 8000 --destport 8050 --authtype none \
+  -- panel serve app.py --port {port} --prefix {root_path}
+```
+
+This eliminates the need to hardcode deployment paths in your application commands, making them portable across different JupyterHub deployments.
+
 ### Process Management
 - `--conda-env` - Conda environment to activate before running command
 - `--workdir` - Working directory for the process

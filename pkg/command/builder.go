@@ -55,17 +55,43 @@ func (b *Builder) GetCondaWarning() string {
 	return b.condaWarning
 }
 
+// GetRootPath constructs the root path from JUPYTERHUB_SERVICE_PREFIX
+// by prepending /hub and ensuring proper path formatting (no double slashes, proper trailing slash handling)
+func GetRootPath() string {
+	servicePrefix := os.Getenv("JUPYTERHUB_SERVICE_PREFIX")
+	if servicePrefix == "" {
+		return ""
+	}
+
+	// Ensure service prefix starts with /
+	if !strings.HasPrefix(servicePrefix, "/") {
+		servicePrefix = "/" + servicePrefix
+	}
+
+	// Remove trailing slash from service prefix for consistent joining
+	servicePrefix = strings.TrimSuffix(servicePrefix, "/")
+
+	// Construct root path: /hub + service_prefix
+	rootPath := "/hub" + servicePrefix
+
+	return rootPath
+}
+
 // SubstitutePort replaces jhsingle-native-proxy style placeholders in command arguments
-// Handles: {port} → actual port, {-} → -, {--} → --, and strips surrounding quotes
+// Handles: {port} → actual port, {root_path} → JupyterHub root path, {-} → -, {--} → --, and strips surrounding quotes
 func SubstitutePort(command []string, allocatedPort int) []string {
 	result := make([]string, len(command))
 	portStr := fmt.Sprintf("%d", allocatedPort)
+	rootPath := GetRootPath()
 
 	for i, arg := range command {
 		processed := arg
 
 		// Replace port placeholder
 		processed = strings.ReplaceAll(processed, "{port}", portStr)
+
+		// Replace root_path placeholder
+		processed = strings.ReplaceAll(processed, "{root_path}", rootPath)
 
 		// Replace dash placeholders (jhsingle-native-proxy compatibility)
 		processed = strings.ReplaceAll(processed, "{-}", "-")
