@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/nebari-dev/jhub-app-proxy/pkg/activity"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/logger"
 )
 
@@ -142,23 +143,79 @@ func (c *Client) NotifyActivity(ctx context.Context) error {
 	return nil
 }
 
+// NotifyActivityWithTime notifies JupyterHub of activity with a specific timestamp
+// This is used when keepAlive=false to report actual last activity time
+func (c *Client) NotifyActivityWithTime(ctx context.Context, timestamp time.Time) error {
+	endpoint := fmt.Sprintf("%s/users/%s/activity", c.baseURL, c.username)
+
+	payload := ActivityPayload{
+		LastActivity: timestamp,
+	}
+
+	// Include server-specific activity if server name is set
+	if c.servername != "" {
+		payload.Servers = map[string]ServerActivity{
+			c.servername: {
+				LastActivity: timestamp,
+			},
+		}
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal activity payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("token %s", c.apiToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	start := time.Now()
+	resp, err := c.httpClient.Do(req)
+	duration := time.Since(start)
+
+	if err != nil {
+		c.logger.HubAPICall("POST", endpoint, 0, duration, err)
+		return fmt.Errorf("failed to notify activity: %w", err)
+	}
+	defer resp.Body.Close()
+
+	c.logger.HubAPICall("POST", endpoint, resp.StatusCode, duration, nil)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("activity notification failed with status %d: %s",
+			resp.StatusCode, string(body))
+	}
+
+	c.logger.Debug("activity notification successful", "timestamp", timestamp)
+	return nil
+}
+
 // StartActivityReporter starts a background goroutine that periodically reports activity
 // Returns a cancel function to stop the reporter
-func (c *Client) StartActivityReporter(ctx context.Context, interval time.Duration, forceAlive bool) context.CancelFunc {
+//
+// If keepAlive is true: Always report current time (prevent idle culling)
+// If keepAlive is false: Only report when there's actual activity tracked by activityTracker
+func (c *Client) StartActivityReporter(ctx context.Context, interval time.Duration, keepAlive bool, activityTracker *activity.Tracker) context.CancelFunc {
 	ctx, cancel := context.WithCancel(ctx)
 
 	go func() {
 		c.logger.Info("starting activity reporter",
 			"interval", interval,
-			"force_alive", forceAlive,
+			"keep_alive", keepAlive,
 			"username", c.username,
 			"servername", c.servername)
 
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		// Report activity immediately on start if force_alive is enabled
-		if forceAlive {
+		// Report activity immediately on start if keepAlive is enabled
+		if keepAlive {
 			if err := c.NotifyActivity(ctx); err != nil {
 				c.logger.Error("failed to notify activity on start", err)
 			}
@@ -170,13 +227,27 @@ func (c *Client) StartActivityReporter(ctx context.Context, interval time.Durati
 				c.logger.Info("activity reporter stopped")
 				return
 			case <-ticker.C:
-				// In force_alive mode, always report activity
-				// In normal mode, only report if there was actual activity
-				// (for now, we always report - activity tracking can be added later)
-				if err := c.NotifyActivity(ctx); err != nil {
-					c.logger.Error("failed to notify activity", err,
-						"username", c.username,
-						"servername", c.servername)
+				if keepAlive {
+					// Always report current time (keep alive forever)
+					if err := c.NotifyActivity(ctx); err != nil {
+						c.logger.Error("failed to notify activity", err,
+							"username", c.username,
+							"servername", c.servername)
+					}
+				} else {
+					// Only report if there was actual activity
+					lastActivity := activityTracker.GetLastActivity()
+					if lastActivity != nil {
+						if err := c.NotifyActivityWithTime(ctx, *lastActivity); err != nil {
+							c.logger.Error("failed to notify activity", err,
+								"username", c.username,
+								"servername", c.servername,
+								"last_activity", lastActivity)
+						}
+					} else {
+						// No activity yet, don't send notification
+						c.logger.Debug("no activity to report yet")
+					}
 				}
 			}
 		}

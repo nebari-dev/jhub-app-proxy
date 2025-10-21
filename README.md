@@ -135,8 +135,7 @@ This eliminates the need to hardcode deployment paths in your application comman
 ### Process Management
 - `--conda-env` - Conda environment to activate before running command
 - `--workdir` - Working directory for the process
-- `--force-alive` - Force keep-alive to prevent idle culling (default: `true`)
-- `--no-force-alive` - Disable force keep-alive, report only real activity
+- `--keep-alive` - Always report activity to prevent idle culling (default: `false`)
 
 ### Git Repository
 - `--repo` - Git repository URL to clone before starting app

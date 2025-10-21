@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/nebari-dev/jhub-app-proxy/pkg/activity"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/interim"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/logger"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/process"
@@ -23,6 +24,7 @@ type Router struct {
 	appRootPath       string
 	subprocessURL     string
 	oauthCallbackPath string // Empty if OAuth disabled for jhub-app-proxy
+	activityTracker   *activity.Tracker
 }
 
 // Config contains configuration for the router
@@ -37,6 +39,7 @@ type Config struct {
 	AppRootPath       string
 	SubprocessURL     string
 	OAuthCallbackPath string // Empty if OAuth disabled for jhub-app-proxy
+	ActivityTracker   *activity.Tracker
 }
 
 // New creates a new router with the given configuration
@@ -52,6 +55,7 @@ func New(cfg Config) *Router {
 		appRootPath:       cfg.AppRootPath,
 		subprocessURL:     cfg.SubprocessURL,
 		oauthCallbackPath: cfg.OAuthCallbackPath,
+		activityTracker:   cfg.ActivityTracker,
 	}
 }
 
@@ -147,5 +151,11 @@ func (rtr *Router) handleAppRunning(w http.ResponseWriter, r *http.Request, path
 		"path", path,
 		"backend_url", rtr.subprocessURL,
 		"app_status", "running")
+
+	// Record activity for JupyterHub activity reporting
+	if rtr.activityTracker != nil {
+		rtr.activityTracker.RecordActivity()
+	}
+
 	rtr.proxyHandler.ServeHTTP(w, r)
 }
