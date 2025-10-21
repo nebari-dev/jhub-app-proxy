@@ -80,6 +80,24 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 	originalPath := r.URL.Path
 	forwardPath := originalPath
 
+	// Log incoming request details (header names only at INFO level)
+	h.logger.Info("incoming request",
+		"method", r.Method,
+		"path", r.URL.Path,
+		"query", r.URL.RawQuery,
+		"remote_addr", r.RemoteAddr,
+		"header_names", extractHeaderNames(r.Header))
+
+	// Log full headers at DEBUG level
+	h.logger.Debug("incoming request headers",
+		"headers", r.Header)
+
+	// Create response writer wrapper to capture response details
+	rw := &responseWriter{
+		ResponseWriter: w,
+		statusCode:     http.StatusOK,
+	}
+
 	// Strip prefix if configured (default for most apps like Streamlit, Voila, etc.)
 	// Don't strip for apps like JupyterLab that are configured with ServerApp.base_url
 	if h.stripPrefix && h.servicePrefix != "" {
@@ -103,7 +121,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 			"service_prefix", h.servicePrefix,
 			"method", r.Method)
 
-		h.reverseProxy.ServeHTTP(w, newReq)
+		h.reverseProxy.ServeHTTP(rw, newReq)
 	} else {
 		// Forward as-is (for apps configured with base_url like JupyterLab)
 		backendURL := h.upstreamURL + originalPath
@@ -113,6 +131,35 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 			"strip_prefix", h.stripPrefix,
 			"method", r.Method)
 
-		h.reverseProxy.ServeHTTP(w, r)
+		h.reverseProxy.ServeHTTP(rw, r)
 	}
+
+	// Log response details (header names only at INFO level)
+	h.logger.Info("response sent to client",
+		"status_code", rw.statusCode,
+		"header_names", extractHeaderNames(rw.Header()))
+
+	// Log full response headers at DEBUG level
+	h.logger.Debug("response headers",
+		"headers", rw.Header())
+}
+
+// extractHeaderNames returns a slice of header names from an http.Header map
+func extractHeaderNames(headers http.Header) []string {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	return names
+}
+
+// responseWriter wraps http.ResponseWriter to capture status code
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(statusCode int) {
+	rw.statusCode = statusCode
+	rw.ResponseWriter.WriteHeader(statusCode)
 }

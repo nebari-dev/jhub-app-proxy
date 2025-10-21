@@ -116,6 +116,15 @@ func (m *OAuthMiddleware) Wrap(next http.Handler) http.Handler {
 			userData, _ := json.Marshal(user)
 			pr.Header.Set("X-Forwarded-User-Data", string(userData))
 
+			m.logger.Info("setting user data in headers",
+				"header", "X-Forwarded-User-Data",
+				"user_name", user.Name,
+				"user_admin", user.Admin,
+				"user_roles", user.Roles,
+				"user_groups", user.Groups,
+				"user_scopes", user.Scopes,
+				"user_data_json", string(userData))
+
 			next.ServeHTTP(w, pr)
 			return true
 		}
