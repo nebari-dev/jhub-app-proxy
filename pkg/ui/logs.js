@@ -138,11 +138,13 @@ async function checkAppStatus() {
             commandText.textContent = data.process_info.command.join(' ');
         }
 
-        if (data.version) {
-            versionText.textContent = 'jhub-app-proxy ' + data.version;
-        } else {
-            versionText.textContent = 'jhub-app-proxy';
-        }
+        // if (data.version) {
+        //     versionText.textContent = 'jhub-app-proxy ' + data.version;
+        // } else {
+        //     versionText.textContent = 'jhub-app-proxy';
+        // }
+        versionText.textContent = ' '
+
 
         if (data.process_state) {
             const state = data.process_state.state;
@@ -182,7 +184,7 @@ async function checkAppStatus() {
                     window.location.href = appRoot;
                 }, 500); // Small delay to show "redirecting..." message
             } else if (state === 'failed') {
-                title.innerHTML = 'Your app failed to deploy, please fix your mistakes!';
+                title.innerHTML = 'The configured App failed to deploy, please check the logs below!';
                 title.classList.add('error');
                 progressContainer.classList.add('hidden');
             }
