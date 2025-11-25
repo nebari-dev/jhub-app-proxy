@@ -29,7 +29,7 @@ func TestOAuthWithJupyterHub(t *testing.T) {
 	ctx := context.Background()
 
 	// Get the path to jupyterhub_config.py
-	configPath, err := filepath.Abs("jupyterhub_config.py")
+	configPath, err := filepath.Abs("testdata/jupyterhub_config.py")
 	if err != nil {
 		t.Fatalf("Failed to get config path: %v", err)
 	}
