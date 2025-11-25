@@ -30,14 +30,6 @@ jobs:
     - name: Run tests
       run: make test
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v5
-      with:
-        file: ./coverage.out
-        flags: unittests
-        name: codecov-umbrella
-        fail_ci_if_error: false
-
   build:
     name: Build
     runs-on: ubuntu-latest
