@@ -78,7 +78,15 @@ func startProxyWithOAuth(t *testing.T, hubAPIURL string) (proxyURL, servicePrefi
 	return proxyURL, servicePrefix, cleanup
 }
 
-// TestWebSocketUpgradeRequiresAuth tests that WebSocket connections without auth are rejected
+// TestWebSocketUpgradeRequiresAuth verifies that WebSocket upgrade requests without authentication
+// are properly rejected with OAuth redirect (302), protecting against the authentication bypass
+// vulnerability (GHSA-w3vc-fx9p-wp4v) found in jupyter-server-proxy.
+//
+// Tests two attack vectors:
+//  1. WebSocket client (websocket.Dial) without auth headers
+//  2. Raw HTTP request with WebSocket Upgrade headers but no auth
+//
+// Both must result in OAuth redirect, NOT 101 Switching Protocols.
 func TestWebSocketUpgradeRequiresAuth(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test with Docker in short mode")
@@ -121,7 +129,7 @@ func TestWebSocketUpgradeRequiresAuth(t *testing.T) {
 			}
 		}
 
-		// Check: The WebSocket upgrade should be REJECTED with 101
+		// Check: The WebSocket upgrade should be REJECTED (must NOT get 101)
 		if resp != nil && resp.StatusCode == http.StatusSwitchingProtocols {
 			t.Fatalf("SECURITY FAILURE: WebSocket upgrade succeeded (got 101 Switching Protocols)")
 		}
@@ -154,9 +162,13 @@ func TestWebSocketUpgradeRequiresAuth(t *testing.T) {
 			t.Fatalf("Failed to create request: %v", err)
 		}
 
+		// Set WebSocket upgrade headers manually to test that OAuth is enforced
+		// even when all WebSocket headers are present
 		req.Header.Set("Connection", "Upgrade")
 		req.Header.Set("Upgrade", "websocket")
 		req.Header.Set("Sec-WebSocket-Version", "13")
+		// Sec-WebSocket-Key: base64-encoded 16-byte nonce required by RFC 6455
+		// Using the standard example value from the WebSocket spec
 		req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
 
 		resp, err := client.Do(req)
@@ -185,7 +197,14 @@ func TestWebSocketUpgradeRequiresAuth(t *testing.T) {
 	})
 }
 
-// TestWebSocketUpgradeWithValidAuth tests WebSocket with valid token using real JupyterHub
+// TestWebSocketUpgradeWithValidAuth verifies that WebSocket connections with valid OAuth tokens
+// are successfully upgraded (101 Switching Protocols) and function correctly.
+//
+// This test validates:
+//  1. Valid JupyterHub API token allows WebSocket upgrade
+//  2. Connection upgrade returns 101 status (not 302 redirect)
+//  3. Bidirectional communication works (echo test)
+//  4. The Hijacker interface implementation enables protocol upgrade
 func TestWebSocketUpgradeWithValidAuth(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test with Docker in short mode")
@@ -229,7 +248,6 @@ func TestWebSocketUpgradeWithValidAuth(t *testing.T) {
 			}
 		}
 
-		// WebSocket upgrade should succeed now that responseWriter implements Hijacker interface
 		if conn == nil {
 			t.Fatalf("WebSocket upgrade failed with valid auth token: err=%v, resp=%v", err, resp)
 		}
@@ -256,6 +274,6 @@ func TestWebSocketUpgradeWithValidAuth(t *testing.T) {
 			t.Errorf("Expected echo '%s', got '%s'", testMessage, receivedMessage)
 		}
 
-		t.Log("✓ WebSocket upgrade succeeded and connection works with valid token")
+		t.Log("WebSocket upgrade succeeded and connection works with valid token")
 	})
 }
