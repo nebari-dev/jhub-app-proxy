@@ -1,4 +1,4 @@
-# JHub Apps Proxy
+# JHub App Proxy
 
 [![Test and Build](https://github.com/nebari-dev/jhub-app-proxy/actions/workflows/test.yml/badge.svg)](https://github.com/nebari-dev/jhub-app-proxy/actions/workflows/test.yml)
 [![Release](https://github.com/nebari-dev/jhub-app-proxy/actions/workflows/release.yml/badge.svg)](https://github.com/nebari-dev/jhub-app-proxy/actions/workflows/release.yml)
@@ -15,7 +15,7 @@ A lightweight app proxy for JupyterHub applications that displays real-time star
 
 **Note:** This project is the successor to [jhsingle-native-proxy](https://github.com/ideonate/jhsingle-native-proxy), rewritten in Go for improved portability, observability, and maintainability.
 
-![JHub Apps Proxy UI](ui-screenshot.png)
+![JHub App Proxy UI](ui-screenshot.png)
 
 ## Features
 
@@ -94,7 +94,7 @@ jhub-app-proxy --port 8000 --destport 8050 --authtype none --log-format pretty \
 ## How It Works
 
 1. User clicks "Launch App" in JupyterHub
-2. JHub Apps Proxy starts and immediately shows a log viewer (200 status)
+2. JHub App Proxy starts and immediately shows a log viewer (200 status)
 3. JupyterHub redirects the user to see real-time startup logs
 4. Once the app passes health checks, traffic is proxied to your application
 5. User never sees a timeout or loading spinner
@@ -105,10 +105,11 @@ jhub-app-proxy --port 8000 --destport 8050 --authtype none --log-format pretty \
 - `--port` - Port for proxy server to listen on (default: 8888)
 - `--destport` - Internal subprocess port (0 = random, default: 0)
 - `--authtype` - Authentication type: `oauth`, `none` (default: `oauth`)
+- `--interim-page-auth` - Protect interim pages and logs API with OAuth even when `--authtype=none` (allows public app with protected logs, default: `false`)
 
 ### Template Substitution
 
-JHub Apps Proxy supports template placeholders in your application commands that are automatically replaced at runtime:
+JHub App Proxy supports template placeholders in your application commands that are automatically replaced at runtime:
 
 #### Port Templating
 Use `{port}` in your command and it will be replaced with the actual port allocated for internal routing:
@@ -136,6 +137,7 @@ This eliminates the need to hardcode deployment paths in your application comman
 - `--conda-env` - Conda environment to activate before running command
 - `--workdir` - Working directory for the process
 - `--keep-alive` - Always report activity to prevent idle culling (default: `false`)
+- `--strip-prefix` - Strip service prefix before forwarding to backend (default: `true`, use `false` for JupyterLab)
 
 ### Git Repository
 - `--repo` - Git repository URL to clone before starting app
