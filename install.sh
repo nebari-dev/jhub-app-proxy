@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
 # JHub App Proxy installer script
@@ -17,6 +17,21 @@ fi
 # Default values
 VERSION=""
 INSTALL_DIR=""
+
+# Detect available download tool
+DOWNLOAD_TOOL=""
+if command -v curl >/dev/null 2>&1; then
+    DOWNLOAD_TOOL="curl"
+elif command -v wget >/dev/null 2>&1; then
+    DOWNLOAD_TOOL="wget"
+elif command -v python3 >/dev/null 2>&1; then
+    DOWNLOAD_TOOL="python3"
+elif command -v python >/dev/null 2>&1; then
+    DOWNLOAD_TOOL="python"
+else
+    echo "Error: No download tool found (tried: curl, wget, python3, python)" >&2
+    exit 1
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -44,6 +59,55 @@ error() {
     exit 1
 }
 
+# Download file using available tool
+# Usage: download_file <url> <output_path>
+download_file() {
+    local url="$1"
+    local output="$2"
+
+    case "$DOWNLOAD_TOOL" in
+        curl)
+            curl -L -# "$url" -o "$output"
+            ;;
+        wget)
+            wget -O "$output" "$url"
+            ;;
+        python3)
+            python3 -c "import urllib.request; urllib.request.urlretrieve('$url', '$output')"
+            ;;
+        python)
+            python -c "import urllib.request; urllib.request.urlretrieve('$url', '$output')"
+            ;;
+        *)
+            error "No download tool available"
+            ;;
+    esac
+}
+
+# Fetch URL content to stdout
+# Usage: fetch_url <url>
+fetch_url() {
+    local url="$1"
+
+    case "$DOWNLOAD_TOOL" in
+        curl)
+            curl -s "$url"
+            ;;
+        wget)
+            wget -qO- "$url"
+            ;;
+        python3)
+            python3 -c "import urllib.request; import sys; response = urllib.request.urlopen('$url'); sys.stdout.buffer.write(response.read())"
+            ;;
+        python)
+            python -c "import urllib.request; import sys; response = urllib.request.urlopen('$url'); sys.stdout.buffer.write(response.read())"
+            ;;
+        *)
+            error "No download tool available"
+            ;;
+    esac
+}
+
 # Detect OS
 detect_os() {
     case "$(uname -s)" in
@@ -67,11 +131,11 @@ get_latest_version() {
     local version
 
     # Try /releases/latest first
-    version=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    version=$(fetch_url "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
     # If that fails, get the first non-draft, non-prerelease from /releases
     if [ -z "$version" ]; then
-        version=$(curl -s "https://api.github.com/repos/${REPO}/releases" | \
+        version=$(fetch_url "https://api.github.com/repos/${REPO}/releases" | \
                   grep -m 1 '"tag_name":' | \
                   sed -E 's/.*"([^"]+)".*/\1/')
     fi
@@ -110,7 +174,7 @@ EOF
 
 # Parse command line arguments
 parse_args() {
-    while [[ $# -gt 0 ]]; do
+    while [ $# -gt 0 ]; do
         case $1 in
             -v|--version)
                 VERSION="$2"
@@ -138,6 +202,7 @@ main() {
     info "Installing jhub-app-proxy..."
     info "Home directory: ${HOME}"
     info "Install directory: ${install_dir}"
+    info "Using download tool: ${DOWNLOAD_TOOL}"
 
     # Detect system
     local os=$(detect_os)
@@ -166,8 +231,7 @@ main() {
     trap "rm -rf $tmp_dir" EXIT
 
     # Download and extract
-    # Use -# for progress meter (available in all curl versions, unlike --progress-bar)
-    if ! curl -L -# "$download_url" -o "${tmp_dir}/${archive_name}"; then
+    if ! download_file "$download_url" "${tmp_dir}/${archive_name}"; then
         error "Failed to download release"
     fi
 
@@ -190,10 +254,14 @@ main() {
     info "Successfully installed jhub-app-proxy $version"
 
     # Check if install_dir is in PATH
-    if [[ ":$PATH:" != *":${install_dir}:"* ]]; then
-        warn "Installation directory is not in PATH"
-        warn "Add to your shell profile: export PATH=\"${install_dir}:\$PATH\""
-    fi
+    case ":$PATH:" in
+        *":${install_dir}:"*)
+            ;;
+        *)
+            warn "Installation directory is not in PATH"
+            warn "Add to your shell profile: export PATH=\"${install_dir}:\$PATH\""
+            ;;
+    esac
 
     info "Run 'jhub-app-proxy --help' to get started"
 }

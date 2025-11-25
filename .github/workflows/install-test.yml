@@ -28,7 +28,7 @@ jobs:
       - name: Test install script with latest version
         run: |
           chmod +x install.sh
-          ./install.sh -v v0.1
+          ./install.sh
 
       - name: Verify installation
         run: |
