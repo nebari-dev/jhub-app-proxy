@@ -5,10 +5,13 @@
 package proxy
 
 import (
+	"bufio"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 
 	"github.com/nebari-dev/jhub-app-proxy/pkg/auth"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/logger"
@@ -80,6 +83,11 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 	originalPath := r.URL.Path
 	forwardPath := originalPath
 
+	// Check if this is a WebSocket upgrade request
+	upgrade := r.Header.Get("Upgrade")
+	connection := r.Header.Get("Connection")
+	isWebSocket := strings.EqualFold(upgrade, "websocket") && strings.Contains(strings.ToLower(connection), "upgrade")
+
 	// Log incoming request details (header names only at INFO level)
 	h.logger.Info("incoming request",
 		"method", r.Method,
@@ -121,6 +129,13 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 			"service_prefix", h.servicePrefix,
 			"method", r.Method)
 
+		// Log WebSocket upgrade before hijacking
+		if isWebSocket {
+			h.logger.Info("WebSocket upgrade request detected",
+				"path", originalPath,
+				"remote_addr", r.RemoteAddr)
+		}
+
 		h.reverseProxy.ServeHTTP(rw, newReq)
 	} else {
 		// Forward as-is (for apps configured with base_url like JupyterLab)
@@ -131,10 +146,19 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 			"strip_prefix", h.stripPrefix,
 			"method", r.Method)
 
+		// Log WebSocket upgrade before hijacking
+		if isWebSocket {
+			h.logger.Info("WebSocket upgrade request detected",
+				"path", originalPath,
+				"remote_addr", r.RemoteAddr)
+		}
+
 		h.reverseProxy.ServeHTTP(rw, r)
 	}
 
 	// Log response details (header names only at INFO level)
+	// Note: For successful WebSocket upgrades, this code won't execute because
+	// the connection is hijacked at the TCP level by reverseProxy.ServeHTTP()
 	h.logger.Info("response sent to client",
 		"status_code", rw.statusCode,
 		"header_names", extractHeaderNames(rw.Header()))
@@ -162,4 +186,32 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(statusCode int) {
 	rw.statusCode = statusCode
 	rw.ResponseWriter.WriteHeader(statusCode)
+}
+
+// Hijack implements http.Hijacker interface for WebSocket upgrades
+// This allows the reverse proxy to take control of the underlying TCP connection
+// for protocol upgrades like WebSocket (HTTP/1.1 101 Switching Protocols)
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := rw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("responseWriter: underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return hijacker.Hijack()
+}
+
+// Flush implements http.Flusher interface for progressive response streaming
+// This is required for streaming applications like Voila that need immediate flushing
+func (rw *responseWriter) Flush() {
+	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// Push implements http.Pusher interface for HTTP/2 server push
+// This enables HTTP/2 optimization by pushing resources before they're requested
+func (rw *responseWriter) Push(target string, opts *http.PushOptions) error {
+	if pusher, ok := rw.ResponseWriter.(http.Pusher); ok {
+		return pusher.Push(target, opts)
+	}
+	return fmt.Errorf("responseWriter: underlying ResponseWriter does not implement http.Pusher")
 }

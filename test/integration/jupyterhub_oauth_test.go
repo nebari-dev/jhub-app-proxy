@@ -11,13 +11,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // TestOAuthWithJupyterHub tests OAuth authentication with a real JupyterHub instance
@@ -28,55 +24,15 @@ func TestOAuthWithJupyterHub(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Get the path to jupyterhub_config.py
-	configPath, err := filepath.Abs("testdata/jupyterhub_config.py")
+	jupyterhubContainer, hubAPIURL, hubURL, err := startJupyterHubContainer(ctx, t)
 	if err != nil {
-		t.Fatalf("Failed to get config path: %v", err)
-	}
-
-	// Start JupyterHub container
-	req := testcontainers.ContainerRequest{
-		Image:        "jupyterhub/jupyterhub:latest",
-		ExposedPorts: []string{"8000/tcp", "8081/tcp"},
-		WaitingFor:   wait.ForLog("JupyterHub is now running").WithStartupTimeout(60 * time.Second),
-		Files: []testcontainers.ContainerFile{
-			{
-				HostFilePath:      configPath,
-				ContainerFilePath: "/srv/jupyterhub/jupyterhub_config.py",
-				FileMode:          0644,
-			},
-		},
-		Cmd: []string{"jupyterhub", "-f", "/srv/jupyterhub/jupyterhub_config.py"},
-	}
-
-	jupyterhubContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	if err != nil {
-		t.Fatalf("Failed to start JupyterHub container: %v", err)
+		t.Fatalf("Failed to start JupyterHub: %v", err)
 	}
 	defer func() {
 		if err := jupyterhubContainer.Terminate(ctx); err != nil {
 			t.Logf("Failed to terminate container: %v", err)
 		}
 	}()
-
-	// Get the mapped port for JupyterHub
-	hubPort, err := jupyterhubContainer.MappedPort(ctx, "8000")
-	if err != nil {
-		t.Fatalf("Failed to get mapped port: %v", err)
-	}
-
-	hubHost, err := jupyterhubContainer.Host(ctx)
-	if err != nil {
-		t.Fatalf("Failed to get container host: %v", err)
-	}
-
-	hubURL := fmt.Sprintf("http://%s:%s", hubHost, hubPort.Port())
-	hubAPIURL := fmt.Sprintf("%s/hub/api", hubURL)
-
-	t.Logf("JupyterHub running at %s", hubURL)
 
 	// Wait for JupyterHub API to be ready
 	if err := waitForJupyterHubAPI(hubAPIURL, 30*time.Second); err != nil {
@@ -264,29 +220,4 @@ func TestOAuthWithJupyterHub(t *testing.T) {
 
 		t.Logf("Callback endpoint status: %d", resp.StatusCode)
 	})
-}
-
-// waitForJupyterHubAPI waits for JupyterHub API to respond
-func waitForJupyterHubAPI(apiURL string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for JupyterHub API at %s", apiURL)
-		case <-ticker.C:
-			resp, err := http.Get(apiURL)
-			if err == nil {
-				resp.Body.Close()
-				// JupyterHub API returns 200 for /hub/api
-				if resp.StatusCode == 200 {
-					return nil
-				}
-			}
-		}
-	}
 }
