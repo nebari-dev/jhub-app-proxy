@@ -156,18 +156,16 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 		h.reverseProxy.ServeHTTP(rw, r)
 	}
 
-	// For WebSocket connections, the connection is hijacked and this code may not execute
-	// But if it does execute (e.g., upgrade failed), log appropriately
-	if !isWebSocket {
-		// Regular HTTP response logging (header names only at INFO level)
-		h.logger.Info("response sent to client",
-			"status_code", rw.statusCode,
-			"header_names", extractHeaderNames(rw.Header()))
+	// Log response details (header names only at INFO level)
+	// Note: For successful WebSocket upgrades, this code won't execute because
+	// the connection is hijacked at the TCP level by reverseProxy.ServeHTTP()
+	h.logger.Info("response sent to client",
+		"status_code", rw.statusCode,
+		"header_names", extractHeaderNames(rw.Header()))
 
-		// Log full response headers at DEBUG level
-		h.logger.Debug("response headers",
-			"headers", rw.Header())
-	}
+	// Log full response headers at DEBUG level
+	h.logger.Debug("response headers",
+		"headers", rw.Header())
 }
 
 // extractHeaderNames returns a slice of header names from an http.Header map
