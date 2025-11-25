@@ -25,10 +25,10 @@ jobs:
         # https://github.com/actions/checkout/releases/tag/v6.0.0
         uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
 
-      - name: Test install script with latest version
+      - name: Test install script with specific version
         run: |
           chmod +x install.sh
-          ./install.sh
+          ./install.sh -v v0.2.2-rc6
 
       - name: Verify installation
         run: |

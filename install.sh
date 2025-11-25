@@ -47,15 +47,15 @@ timestamp() {
 }
 
 info() {
-    echo -e "$(timestamp) ${GREEN}INF${NC} $1"
+    printf "%s %bINF%b %s\n" "$(timestamp)" "${GREEN}" "${NC}" "$1" >&2
 }
 
 warn() {
-    echo -e "$(timestamp) ${YELLOW}WRN${NC} $1"
+    printf "%s %bWRN%b %s\n" "$(timestamp)" "${YELLOW}" "${NC}" "$1" >&2
 }
 
 error() {
-    echo -e "$(timestamp) ${RED}ERR${NC} $1"
+    printf "%s %bERR%b %s\n" "$(timestamp)" "${RED}" "${NC}" "$1" >&2
     exit 1
 }
 
@@ -91,16 +91,16 @@ fetch_url() {
 
     case "$DOWNLOAD_TOOL" in
         curl)
-            curl -s "$url"
+            curl -sS -f "$url" 2>&1
             ;;
         wget)
-            wget -qO- "$url"
+            wget -qO- "$url" 2>&1
             ;;
         python3)
-            python3 -c "import urllib.request; import sys; response = urllib.request.urlopen('$url'); sys.stdout.buffer.write(response.read())"
+            python3 -c "import urllib.request; import sys; response = urllib.request.urlopen('$url'); sys.stdout.buffer.write(response.read())" 2>&1
             ;;
         python)
-            python -c "import urllib.request; import sys; response = urllib.request.urlopen('$url'); sys.stdout.buffer.write(response.read())"
+            python -c "import urllib.request; import sys; response = urllib.request.urlopen('$url'); sys.stdout.buffer.write(response.read())" 2>&1
             ;;
         *)
             error "No download tool available"
@@ -129,19 +129,33 @@ detect_arch() {
 # Get latest release version from GitHub API
 get_latest_version() {
     local version
+    local response
+    local exit_code=0
 
     # Try /releases/latest first
-    version=$(fetch_url "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    response=$(fetch_url "https://api.github.com/repos/${REPO}/releases/latest" 2>&1) || exit_code=$?
+
+    if [ $exit_code -ne 0 ]; then
+        warn "Failed to fetch from /releases/latest endpoint"
+        warn "Error: $response"
+    else
+        version=$(echo "$response" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    fi
 
     # If that fails, get the first non-draft, non-prerelease from /releases
     if [ -z "$version" ]; then
-        version=$(fetch_url "https://api.github.com/repos/${REPO}/releases" | \
-                  grep -m 1 '"tag_name":' | \
-                  sed -E 's/.*"([^"]+)".*/\1/')
+        exit_code=0
+        response=$(fetch_url "https://api.github.com/repos/${REPO}/releases" 2>&1) || exit_code=$?
+
+        if [ $exit_code -ne 0 ]; then
+            error "Failed to fetch from /releases endpoint. Error: $response"
+        else
+            version=$(echo "$response" | grep -m 1 '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        fi
     fi
 
     if [ -z "$version" ]; then
-        error "Failed to fetch latest version from GitHub"
+        error "Failed to parse version from GitHub API response"
     fi
 
     echo "$version"
@@ -188,7 +202,9 @@ parse_args() {
                 usage
                 ;;
             *)
-                error "Unknown option: $1\nRun '$0 --help' for usage"
+                printf "%s\n" "Unknown option: $1"
+                printf "%s\n" "Run '$0 --help' for usage"
+                exit 1
                 ;;
         esac
     done
