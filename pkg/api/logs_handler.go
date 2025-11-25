@@ -170,9 +170,11 @@ func (h *LogsHandler) HandleClearLogs(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("logs cleared via API")
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status": "logs cleared",
-	})
+	}); err != nil {
+		h.logger.Error("failed to encode response", err)
+	}
 }
 
 // HandleGetAllLogs returns all logs from the persistent file
@@ -217,7 +219,9 @@ func (h *LogsHandler) HandleGetLogo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=3600") // Cache for 1 hour
 	w.WriteHeader(http.StatusOK)
 	if r.Method != http.MethodHead {
-		w.Write(ui.LogoPNG)
+		if _, err := w.Write(ui.LogoPNG); err != nil {
+			h.logger.Error("failed to write logo response", err)
+		}
 	}
 }
 
@@ -233,7 +237,9 @@ func (h *LogsHandler) HandleGetCSS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=3600") // Cache for 1 hour
 	w.WriteHeader(http.StatusOK)
 	if r.Method != http.MethodHead {
-		w.Write([]byte(ui.LogsCSS))
+		if _, err := w.Write([]byte(ui.LogsCSS)); err != nil {
+			h.logger.Error("failed to write CSS response", err)
+		}
 	}
 }
 
@@ -249,7 +255,9 @@ func (h *LogsHandler) HandleGetJS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=3600") // Cache for 1 hour
 	w.WriteHeader(http.StatusOK)
 	if r.Method != http.MethodHead {
-		w.Write([]byte(ui.LogsJS))
+		if _, err := w.Write([]byte(ui.LogsJS)); err != nil {
+			h.logger.Error("failed to write JS response", err)
+		}
 	}
 }
 
