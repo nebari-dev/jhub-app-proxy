@@ -133,7 +133,10 @@ func (c *Config) NormalizePort() {
 	// Try to get port from environment variable (JupyterHub sets this)
 	if c.Port == 0 {
 		if envPort := os.Getenv("JHUB_APPS_SPAWNER_PORT"); envPort != "" {
-			fmt.Sscanf(envPort, "%d", &c.Port)
+			if _, err := fmt.Sscanf(envPort, "%d", &c.Port); err != nil {
+				// Ignore parse errors, will use default
+				c.Port = 0
+			}
 		}
 	}
 	// Default port if still not set

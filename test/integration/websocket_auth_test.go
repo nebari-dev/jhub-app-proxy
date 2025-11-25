@@ -60,7 +60,9 @@ func startProxyWithOAuth(t *testing.T, hubAPIURL string) (proxyURL, servicePrefi
 	// Wait for proxy to be ready
 	if err := waitForHTTP(proxyURL+servicePrefix+"/", 10*time.Second); err != nil {
 		cancel()
-		cmd.Process.Kill()
+		if killErr := cmd.Process.Kill(); killErr != nil {
+			t.Logf("Failed to kill process: %v", killErr)
+		}
 		t.Fatalf("Proxy did not become ready: %v", err)
 	}
 
@@ -71,7 +73,9 @@ func startProxyWithOAuth(t *testing.T, hubAPIURL string) (proxyURL, servicePrefi
 	cleanup = func() {
 		cancel()
 		if cmd.Process != nil {
-			cmd.Process.Kill()
+			if err := cmd.Process.Kill(); err != nil {
+				t.Logf("Failed to kill process: %v", err)
+			}
 		}
 	}
 
@@ -97,7 +101,11 @@ func TestWebSocketUpgradeRequiresAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start JupyterHub: %v", err)
 	}
-	defer jupyterhubContainer.Terminate(ctx)
+	defer func() {
+		if err := jupyterhubContainer.Terminate(ctx); err != nil {
+			t.Logf("Failed to terminate JupyterHub container: %v", err)
+		}
+	}()
 
 	if err := waitForJupyterHubAPI(hubAPIURL, 30*time.Second); err != nil {
 		t.Fatalf("JupyterHub API not ready: %v", err)
@@ -215,7 +223,11 @@ func TestWebSocketUpgradeWithValidAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start JupyterHub: %v", err)
 	}
-	defer jupyterhubContainer.Terminate(ctx)
+	defer func() {
+		if err := jupyterhubContainer.Terminate(ctx); err != nil {
+			t.Logf("Failed to terminate JupyterHub container: %v", err)
+		}
+	}()
 
 	if err := waitForJupyterHubAPI(hubAPIURL, 30*time.Second); err != nil {
 		t.Fatalf("JupyterHub API not ready: %v", err)

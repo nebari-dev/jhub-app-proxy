@@ -70,8 +70,14 @@ func (lb *LogBuffer) Append(entry LogEntry) {
 			entry.Timestamp.Format("2006-01-02 15:04:05.000"),
 			entry.Stream,
 			entry.Line)
-		lb.logFile.WriteString(logLine)
-		lb.logFile.Sync() // Ensure it's written to disk
+		if _, err := lb.logFile.WriteString(logLine); err != nil {
+			// Log write errors are logged but don't stop execution
+			fmt.Fprintf(os.Stderr, "failed to write log to file: %v\n", err)
+		}
+		if err := lb.logFile.Sync(); err != nil {
+			// Sync errors are logged but don't stop execution
+			fmt.Fprintf(os.Stderr, "failed to sync log file: %v\n", err)
+		}
 	}
 }
 

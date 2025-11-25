@@ -133,13 +133,17 @@ func startJupyterHubContainer(ctx context.Context, t *testing.T) (testcontainers
 
 	hubPort, err := container.MappedPort(ctx, "8000")
 	if err != nil {
-		container.Terminate(ctx)
+		if termErr := container.Terminate(ctx); termErr != nil {
+			t.Logf("Failed to terminate container after error: %v", termErr)
+		}
 		return nil, "", "", fmt.Errorf("failed to get mapped port: %w", err)
 	}
 
 	hubHost, err := container.Host(ctx)
 	if err != nil {
-		container.Terminate(ctx)
+		if termErr := container.Terminate(ctx); termErr != nil {
+			t.Logf("Failed to terminate container after error: %v", termErr)
+		}
 		return nil, "", "", fmt.Errorf("failed to get container host: %w", err)
 	}
 

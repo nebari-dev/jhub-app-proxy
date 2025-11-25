@@ -57,7 +57,9 @@ func TestInterimPageAuthFlag(t *testing.T) {
 	}
 	defer func() {
 		if cmd.Process != nil {
-			cmd.Process.Kill()
+			if err := cmd.Process.Kill(); err != nil {
+				t.Logf("Failed to kill process: %v", err)
+			}
 		}
 	}()
 

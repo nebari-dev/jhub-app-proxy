@@ -29,7 +29,11 @@ func TestOAuthCallbackForInterimPages(t *testing.T) {
 	// Start mock JupyterHub OAuth server
 	hubURL := fmt.Sprintf("http://127.0.0.1:%d", hubPort)
 	mockHub := startMockJupyterHub(t, hubPort)
-	defer mockHub.Shutdown(context.Background())
+	defer func() {
+		if err := mockHub.Shutdown(context.Background()); err != nil {
+			t.Logf("Failed to shutdown mock hub: %v", err)
+		}
+	}()
 
 	// Build the binary
 	binaryPath := buildBinary(t)
@@ -69,7 +73,9 @@ func TestOAuthCallbackForInterimPages(t *testing.T) {
 	}
 	defer func() {
 		if cmd.Process != nil {
-			cmd.Process.Kill()
+			if err := cmd.Process.Kill(); err != nil {
+				t.Logf("Failed to kill process: %v", err)
+			}
 		}
 	}()
 
@@ -191,10 +197,12 @@ func startMockJupyterHub(t *testing.T, port int) *http.Server {
 
 		// Return access token
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		if err := json.NewEncoder(w).Encode(map[string]string{
 			"access_token": "test-access-token-67890",
 			"token_type":   "Bearer",
-		})
+		}); err != nil {
+			t.Logf("Failed to encode token response: %v", err)
+		}
 	})
 
 	// Mock user API endpoint for token validation
@@ -209,12 +217,14 @@ func startMockJupyterHub(t *testing.T, port int) *http.Server {
 
 		// Return user info
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"name":   "testuser",
 			"admin":  false,
 			"groups": []string{},
 			"scopes": []string{"access:servers"},
-		})
+		}); err != nil {
+			t.Logf("Failed to encode user response: %v", err)
+		}
 	})
 
 	server := &http.Server{

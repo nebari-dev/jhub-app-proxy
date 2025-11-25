@@ -179,7 +179,11 @@ func (m *OAuthMiddleware) getUser(token string) (*User, error) {
 func (m *OAuthMiddleware) redirectToLogin(w http.ResponseWriter, r *http.Request) {
 	// Generate random state
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		m.logger.Error("failed to generate random state", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 	state := base64.URLEncoding.EncodeToString(b)
 
 	// Store original URL to redirect back after OAuth
