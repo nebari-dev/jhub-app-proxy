@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -195,70 +193,6 @@ func TestBasicHTTPServer(t *testing.T) {
 		// We don't check explicitly as the test cleanup will handle killing if needed
 		t.Log("Graceful shutdown signal sent successfully")
 	})
-}
-
-// Helper functions
-
-// getFreePort returns a free TCP port
-func getFreePort(t *testing.T) int {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to get free port: %v", err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-	return port
-}
-
-// buildBinary builds the jhub-app-proxy binary and returns its path
-func buildBinary(t *testing.T) string {
-	// Get project root (two levels up from test/integration)
-	projectRoot, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("Failed to get project root: %v", err)
-	}
-
-	binaryPath := filepath.Join(projectRoot, "jhub-app-proxy-test")
-
-	cmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/jhub-app-proxy")
-	cmd.Dir = projectRoot
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("Failed to build binary: %v", err)
-	}
-
-	// Clean up binary after test
-	t.Cleanup(func() {
-		os.Remove(binaryPath)
-	})
-
-	return binaryPath
-}
-
-// waitForHTTP waits for an HTTP endpoint to respond
-func waitForHTTP(url string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for %s", url)
-		case <-ticker.C:
-			resp, err := http.Get(url)
-			if err == nil {
-				resp.Body.Close()
-				if resp.StatusCode == 200 {
-					return nil
-				}
-			}
-		}
-	}
 }
 
 // waitForAppReady polls the stats API until the app state is "running"
