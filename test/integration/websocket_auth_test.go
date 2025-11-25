@@ -25,12 +25,8 @@ func startProxyWithOAuth(t *testing.T, hubAPIURL string) (proxyURL, servicePrefi
 	destPort := getFreePort(t)
 	binaryPath := buildBinary(t)
 
-	// Get absolute path to WebSocket echo server
-	wsEchoPath, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get working directory: %v", err)
-	}
-	wsEchoPath = wsEchoPath + "/testdata/ws-echo"
+	// Build and get path to WebSocket echo server
+	wsEchoPath := buildWebSocketEchoServer(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 

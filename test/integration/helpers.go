@@ -53,6 +53,31 @@ func buildBinary(t *testing.T) string {
 	return binaryPath
 }
 
+// buildWebSocketEchoServer builds the WebSocket echo server and returns its path
+func buildWebSocketEchoServer(t *testing.T) string {
+	testDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+
+	binaryPath := filepath.Join(testDir, "testdata", "ws-echo")
+
+	cmd := exec.Command("go", "build", "-o", binaryPath, "./testdata/websocket_server.go")
+	cmd.Dir = testDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to build ws-echo server: %v", err)
+	}
+
+	t.Cleanup(func() {
+		os.Remove(binaryPath)
+	})
+
+	return binaryPath
+}
+
 // waitForHTTP waits for an HTTP endpoint to respond with 200 OK
 func waitForHTTP(url string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
