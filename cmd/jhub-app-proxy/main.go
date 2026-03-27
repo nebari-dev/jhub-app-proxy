@@ -65,11 +65,13 @@ func run(cfg *config.Config) error {
 	}
 
 	// Print startup banner
+	envManager := os.Getenv("JHUB_APP_ENV_MANAGER")
 	log.StartupBanner(Version, map[string]interface{}{
 		"auth_type":        cfg.AuthType,
 		"port":             cfg.Port,
 		"dest_port":        cfg.DestPort,
 		"conda_env":        cfg.CondaEnv,
+		"env_manager":      envManager,
 		"log_level":        cfg.LogLevel,
 		"log_format":       cfg.LogFormat,
 		"log_buffer_size":  cfg.LogBufferSize,
@@ -135,10 +137,12 @@ func run(cfg *config.Config) error {
 		return fmt.Errorf("failed to create process manager: %w", err)
 	}
 
-	// Add conda warning to log buffer if there was a conda activation failure
-	// This ensures the warning appears in the interim UI logs
+	// Add environment activation warnings to log buffer for the interim UI
 	if condaWarning := cmdBuilder.GetCondaWarning(); condaWarning != "" {
 		mgr.AddErrorLog(condaWarning)
+	}
+	if pixiWarning := cmdBuilder.GetPixiWarning(); pixiWarning != "" {
+		mgr.AddErrorLog(pixiWarning)
 	}
 
 	// Create and start HTTP server

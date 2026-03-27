@@ -1,8 +1,14 @@
 package command
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/nebari-dev/jhub-app-proxy/pkg/logger"
+	"github.com/nebari-dev/jhub-app-proxy/pkg/pixi"
 )
 
 func TestGetRootPath(t *testing.T) {
@@ -135,5 +141,182 @@ func TestSubstitutePort(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// newTestLogger creates a logger suitable for testing.
+func newTestLogger() *logger.Logger {
+	return logger.New(logger.Config{
+		Level:  logger.LevelDebug,
+		Format: logger.FormatJSON,
+		Output: os.Stderr,
+	})
+}
+
+// setupPixiTestEnv creates fake nebi and pixi binaries plus a workspace with a
+// pixi.toml manifest. It sets PATH so both binaries are discoverable and returns
+// the environment name to pass to Build().
+func setupPixiTestEnv(t *testing.T) (tmpDir string, envName string) {
+	t.Helper()
+	tmpDir = t.TempDir()
+	workspacePath := filepath.Join(tmpDir, "workspaces", "data-science")
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspacePath, "pixi.toml"), []byte("[project]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workspaces := []pixi.Workspace{
+		{Name: "data-science", Path: workspacePath, Missing: false},
+	}
+	wsJSON, _ := json.Marshal(workspaces)
+
+	nebiBin := filepath.Join(tmpDir, "nebi")
+	if err := os.WriteFile(nebiBin, []byte("#!/bin/sh\necho '"+string(wsJSON)+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	pixiBin := filepath.Join(tmpDir, "pixi")
+	if err := os.WriteFile(pixiBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", tmpDir+":"+origPath)
+
+	return tmpDir, "alice/data-science"
+}
+
+func TestBuild_PixiWithValidEnv(t *testing.T) {
+	_, envName := setupPixiTestEnv(t)
+	t.Setenv("JHUB_APP_ENV_MANAGER", "pixi")
+
+	b := NewBuilder(newTestLogger())
+	cmd, err := b.Build([]string{"python", "app.py"}, envName)
+	if err != nil {
+		t.Fatalf("Build() error = %v, want nil", err)
+	}
+
+	// Command should start with "pixi run"
+	if len(cmd) < 2 || cmd[0] != "pixi" || cmd[1] != "run" {
+		t.Fatalf("Build() = %v, want command starting with [pixi run ...]", cmd)
+	}
+
+	// Should contain the original command at the end
+	if cmd[len(cmd)-2] != "python" || cmd[len(cmd)-1] != "app.py" {
+		t.Errorf("Build() command tail = %v, want [python app.py]", cmd[len(cmd)-2:])
+	}
+
+	// No pixi warning should be stored
+	if w := b.GetPixiWarning(); w != "" {
+		t.Errorf("GetPixiWarning() = %q, want empty", w)
+	}
+}
+
+func TestBuild_PixiWithFailingEnv(t *testing.T) {
+	// Set up nebi that returns workspaces, but request a non-existent one
+	tmpDir := t.TempDir()
+	workspaces := []pixi.Workspace{
+		{Name: "other", Path: "/tmp/other", Missing: false},
+	}
+	wsJSON, _ := json.Marshal(workspaces)
+
+	nebiBin := filepath.Join(tmpDir, "nebi")
+	if err := os.WriteFile(nebiBin, []byte("#!/bin/sh\necho '"+string(wsJSON)+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pixiBin := filepath.Join(tmpDir, "pixi")
+	if err := os.WriteFile(pixiBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", tmpDir+":"+origPath)
+	t.Setenv("JHUB_APP_ENV_MANAGER", "pixi")
+
+	b := NewBuilder(newTestLogger())
+	cmd, err := b.Build([]string{"python", "app.py"}, "alice/nonexistent")
+	if err != nil {
+		t.Fatalf("Build() error = %v, want nil (graceful fallback)", err)
+	}
+
+	// Should return the original command unchanged
+	if len(cmd) != 2 || cmd[0] != "python" || cmd[1] != "app.py" {
+		t.Errorf("Build() = %v, want [python app.py]", cmd)
+	}
+
+	// A pixi warning should be stored
+	if w := b.GetPixiWarning(); w == "" {
+		t.Error("GetPixiWarning() = empty, want warning about failed activation")
+	} else if !strings.Contains(w, "WARNING") {
+		t.Errorf("GetPixiWarning() = %q, want it to contain 'WARNING'", w)
+	}
+}
+
+func TestBuild_DefaultCondaPath(t *testing.T) {
+	// Unset the env manager so it falls through to conda
+	t.Setenv("JHUB_APP_ENV_MANAGER", "")
+
+	b := NewBuilder(newTestLogger())
+	cmd, err := b.Build([]string{"python", "app.py"}, "myenv")
+	if err != nil {
+		t.Fatalf("Build() error = %v, want nil (graceful fallback)", err)
+	}
+
+	// Conda will fail (no conda on PATH in test), so original command returned
+	if len(cmd) != 2 || cmd[0] != "python" || cmd[1] != "app.py" {
+		t.Errorf("Build() = %v, want [python app.py]", cmd)
+	}
+
+	// A conda warning should be stored
+	if w := b.GetCondaWarning(); w == "" {
+		t.Error("GetCondaWarning() = empty, want warning about failed activation")
+	}
+}
+
+func TestBuild_PixiNotOnPath(t *testing.T) {
+	// Set up nebi with a valid workspace, but do NOT put pixi on PATH.
+	// Use only tmpDir in PATH so the real system pixi is not discoverable.
+	tmpDir := t.TempDir()
+	workspacePath := filepath.Join(tmpDir, "workspaces", "data-science")
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspacePath, "pixi.toml"), []byte("[project]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workspaces := []pixi.Workspace{
+		{Name: "data-science", Path: workspacePath, Missing: false},
+	}
+	wsJSON, _ := json.Marshal(workspaces)
+
+	nebiBin := filepath.Join(tmpDir, "nebi")
+	if err := os.WriteFile(nebiBin, []byte("#!/bin/sh\necho '"+string(wsJSON)+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Intentionally do NOT create a pixi binary
+
+	// Set PATH to only tmpDir so nebi is found but pixi is not
+	t.Setenv("PATH", tmpDir)
+	t.Setenv("JHUB_APP_ENV_MANAGER", "pixi")
+
+	b := NewBuilder(newTestLogger())
+	cmd, err := b.Build([]string{"python", "app.py"}, "alice/data-science")
+	if err != nil {
+		t.Fatalf("Build() error = %v, want nil (graceful fallback)", err)
+	}
+
+	// Should return original command unchanged
+	if len(cmd) != 2 || cmd[0] != "python" || cmd[1] != "app.py" {
+		t.Errorf("Build() = %v, want [python app.py]", cmd)
+	}
+
+	// A pixi warning about pixi not found should be stored
+	if w := b.GetPixiWarning(); w == "" {
+		t.Error("GetPixiWarning() = empty, want warning about pixi not found")
+	} else if !strings.Contains(w, "pixi not found in PATH") {
+		t.Errorf("GetPixiWarning() = %q, want it to contain 'pixi not found in PATH'", w)
 	}
 }

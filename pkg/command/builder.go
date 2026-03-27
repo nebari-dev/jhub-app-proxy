@@ -8,12 +8,14 @@ import (
 
 	"github.com/nebari-dev/jhub-app-proxy/pkg/conda"
 	"github.com/nebari-dev/jhub-app-proxy/pkg/logger"
+	"github.com/nebari-dev/jhub-app-proxy/pkg/pixi"
 )
 
 // Builder helps construct and manipulate commands for subprocess execution
 type Builder struct {
-	logger         *logger.Logger
-	condaWarning   string // Stores conda activation warning if any
+	logger       *logger.Logger
+	condaWarning string // Stores conda activation warning if any
+	pixiWarning  string // Stores pixi activation warning if any
 }
 
 // NewBuilder creates a new command builder
@@ -29,22 +31,37 @@ func (b *Builder) Build(command []string, condaEnv string) ([]string, error) {
 		return nil, fmt.Errorf("no command specified")
 	}
 
-	// Apply conda activation if specified
+	// Apply environment activation if specified
 	if condaEnv != "" {
-		condaMgr := conda.NewManager(b.logger)
-		activatedCommand, err := condaMgr.BuildActivationCommand(condaEnv, command)
-		if err != nil {
-			// Store warning message for later display in interim UI
-			b.condaWarning = fmt.Sprintf("WARNING: Conda environment activation failed: %s. Running command without conda activation.", err.Error())
+		envManager := os.Getenv("JHUB_APP_ENV_MANAGER")
+		if envManager == "pixi" {
+			pixiMgr := pixi.NewManager(b.logger)
+			activatedCommand, err := pixiMgr.BuildActivationCommand(condaEnv, command)
+			if err != nil {
+				b.pixiWarning = fmt.Sprintf("WARNING: Pixi environment activation failed: %s. Running command without pixi activation.", err.Error())
+				b.logger.Warn("pixi environment activation failed, running command without pixi activation",
+					"env", condaEnv,
+					"error", err.Error())
+				return command, nil
+			}
+			command = activatedCommand
+		} else {
+			// Default: conda activation
+			condaMgr := conda.NewManager(b.logger)
+			activatedCommand, err := condaMgr.BuildActivationCommand(condaEnv, command)
+			if err != nil {
+				// Store warning message for later display in interim UI
+				b.condaWarning = fmt.Sprintf("WARNING: Conda environment activation failed: %s. Running command without conda activation.", err.Error())
 
-			// Log warning but continue with original command without conda activation
-			b.logger.Warn("conda environment activation failed, running command without conda activation",
-				"conda_env", condaEnv,
-				"error", err.Error())
-			// Return original command without conda activation
-			return command, nil
+				// Log warning but continue with original command without conda activation
+				b.logger.Warn("conda environment activation failed, running command without conda activation",
+					"conda_env", condaEnv,
+					"error", err.Error())
+				// Return original command without conda activation
+				return command, nil
+			}
+			command = activatedCommand
 		}
-		command = activatedCommand
 	}
 
 	return command, nil
@@ -53,6 +70,11 @@ func (b *Builder) Build(command []string, condaEnv string) ([]string, error) {
 // GetCondaWarning returns the conda activation warning message if any
 func (b *Builder) GetCondaWarning() string {
 	return b.condaWarning
+}
+
+// GetPixiWarning returns the pixi activation warning message if any
+func (b *Builder) GetPixiWarning() string {
+	return b.pixiWarning
 }
 
 // GetRootPath constructs the root path from JUPYTERHUB_SERVICE_PREFIX
