@@ -12,6 +12,10 @@ import (
 	"github.com/nebari-dev/jhub-app-proxy/pkg/logger"
 )
 
+// defaultPixiEnv is the pixi environment used for nebi workspaces.
+// Nebi workspaces use the "default" pixi environment by convention.
+const defaultPixiEnv = "default"
+
 // Workspace represents a single entry from 'nebi workspace list --json'
 type Workspace struct {
 	Name    string `json:"name"`
@@ -69,9 +73,15 @@ func (m *Manager) FindWorkspacePath(envName string) (string, error) {
 	// Parse JSON output
 	var workspaces []Workspace
 	if err := json.Unmarshal(output, &workspaces); err != nil {
+		// Truncate raw output to avoid huge log entries from malformed nebi output
+		rawOutput := string(output)
+		const maxRawOutputLen = 500
+		if len(rawOutput) > maxRawOutputLen {
+			rawOutput = rawOutput[:maxRawOutputLen] + "... (truncated)"
+		}
 		m.logger.Error("failed to parse nebi workspace list JSON", err,
 			"env_name", envName,
-			"raw_output", string(output))
+			"raw_output", rawOutput)
 		return "", fmt.Errorf("failed to parse nebi workspace list JSON: %w", err)
 	}
 	m.logger.Debug("parsed workspace list",
@@ -135,6 +145,16 @@ func (m *Manager) BuildActivationCommand(envName string, command []string) ([]st
 		return nil, err
 	}
 
+	// Verify pixi is available on PATH
+	pixiPath, err := exec.LookPath("pixi")
+	if err != nil {
+		m.logger.Warn("pixi binary not found in PATH",
+			"env_name", envName,
+			"error", err.Error())
+		return nil, fmt.Errorf("pixi not found in PATH: %w", err)
+	}
+	m.logger.Debug("found pixi binary", "pixi_path", pixiPath)
+
 	// Find manifest file: check pixi.toml first, then pyproject.toml
 	manifestPath := ""
 	pixiToml := filepath.Join(workspacePath, "pixi.toml")
@@ -163,7 +183,7 @@ func (m *Manager) BuildActivationCommand(envName string, command []string) ([]st
 		"pixi",
 		"run",
 		"--manifest-path", manifestPath,
-		"-e", "default",
+		"-e", defaultPixiEnv,
 		"--",
 	}
 	activationCmd = append(activationCmd, command...)

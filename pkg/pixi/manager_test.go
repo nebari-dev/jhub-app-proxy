@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/nebari-dev/jhub-app-proxy/pkg/logger"
@@ -65,7 +66,7 @@ func TestFindWorkspacePath_NebiNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("FindWorkspacePath() error = nil, want error about nebi not found")
 	}
-	if got := err.Error(); !contains(got, "nebi not found in PATH") {
+	if got := err.Error(); !strings.Contains(got, "nebi not found in PATH") {
 		t.Errorf("error = %q, want it to contain 'nebi not found in PATH'", got)
 	}
 }
@@ -87,7 +88,7 @@ func TestFindWorkspacePath_NebiError(t *testing.T) {
 	if err == nil {
 		t.Fatal("FindWorkspacePath() error = nil, want error about nebi command failure")
 	}
-	if got := err.Error(); !contains(got, "failed to run") {
+	if got := err.Error(); !strings.Contains(got, "failed to run") {
 		t.Errorf("error = %q, want it to contain 'failed to run'", got)
 	}
 }
@@ -108,7 +109,7 @@ func TestFindWorkspacePath_InvalidJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("FindWorkspacePath() error = nil, want JSON parse error")
 	}
-	if got := err.Error(); !contains(got, "failed to parse nebi workspace list JSON") {
+	if got := err.Error(); !strings.Contains(got, "failed to parse nebi workspace list JSON") {
 		t.Errorf("error = %q, want it to contain 'failed to parse nebi workspace list JSON'", got)
 	}
 }
@@ -134,7 +135,7 @@ func TestFindWorkspacePath_WorkspaceNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("FindWorkspacePath() error = nil, want workspace not found error")
 	}
-	if got := err.Error(); !contains(got, "not found in nebi workspace list") {
+	if got := err.Error(); !strings.Contains(got, "not found in nebi workspace list") {
 		t.Errorf("error = %q, want it to contain 'not found in nebi workspace list'", got)
 	}
 }
@@ -155,7 +156,7 @@ func TestFindWorkspacePath_EmptyList(t *testing.T) {
 	if err == nil {
 		t.Fatal("FindWorkspacePath() error = nil, want empty list error")
 	}
-	if got := err.Error(); !contains(got, "no workspaces found") {
+	if got := err.Error(); !strings.Contains(got, "no workspaces found") {
 		t.Errorf("error = %q, want it to contain 'no workspaces found'", got)
 	}
 }
@@ -181,7 +182,7 @@ func TestFindWorkspacePath_MissingWorkspace(t *testing.T) {
 	if err == nil {
 		t.Fatal("FindWorkspacePath() error = nil, want missing workspace error")
 	}
-	if got := err.Error(); !contains(got, "marked as missing") {
+	if got := err.Error(); !strings.Contains(got, "marked as missing") {
 		t.Errorf("error = %q, want it to contain 'marked as missing'", got)
 	}
 }
@@ -218,6 +219,16 @@ func TestFindWorkspacePath_NameWithoutOwner(t *testing.T) {
 	}
 }
 
+// createFakePixi creates a no-op pixi script in the given directory so
+// exec.LookPath("pixi") succeeds during tests.
+func createFakePixi(t *testing.T, dir string) {
+	t.Helper()
+	pixiBin := filepath.Join(dir, "pixi")
+	if err := os.WriteFile(pixiBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // --- BuildActivationCommand tests ---
 
 func TestBuildActivationCommand_WithPixiToml(t *testing.T) {
@@ -241,6 +252,7 @@ func TestBuildActivationCommand_WithPixiToml(t *testing.T) {
 	if err := os.WriteFile(nebiBin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	createFakePixi(t, tmpDir)
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", tmpDir+":"+origPath)
@@ -290,6 +302,7 @@ func TestBuildActivationCommand_WithPyprojectToml(t *testing.T) {
 	if err := os.WriteFile(nebiBin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	createFakePixi(t, tmpDir)
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", tmpDir+":"+origPath)
@@ -342,6 +355,7 @@ func TestBuildActivationCommand_PixiTomlPreferredOverPyproject(t *testing.T) {
 	if err := os.WriteFile(nebiBin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	createFakePixi(t, tmpDir)
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", tmpDir+":"+origPath)
@@ -377,6 +391,7 @@ func TestBuildActivationCommand_NoManifest(t *testing.T) {
 	if err := os.WriteFile(nebiBin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	createFakePixi(t, tmpDir)
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", tmpDir+":"+origPath)
@@ -386,7 +401,7 @@ func TestBuildActivationCommand_NoManifest(t *testing.T) {
 	if err == nil {
 		t.Fatal("BuildActivationCommand() error = nil, want error about missing manifest")
 	}
-	if got := err.Error(); !contains(got, "no manifest file") {
+	if got := err.Error(); !strings.Contains(got, "no manifest file") {
 		t.Errorf("error = %q, want it to contain 'no manifest file'", got)
 	}
 }
@@ -397,7 +412,7 @@ func TestBuildActivationCommand_EmptyCommand(t *testing.T) {
 	if err == nil {
 		t.Fatal("BuildActivationCommand() error = nil, want error about empty command")
 	}
-	if got := err.Error(); !contains(got, "empty command") {
+	if got := err.Error(); !strings.Contains(got, "empty command") {
 		t.Errorf("error = %q, want it to contain 'empty command'", got)
 	}
 }
@@ -442,8 +457,44 @@ func TestBuildActivationCommand_WorkspaceNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("BuildActivationCommand() error = nil, want error about workspace not found")
 	}
-	if got := err.Error(); !contains(got, "not found") {
+	if got := err.Error(); !strings.Contains(got, "not found") {
 		t.Errorf("error = %q, want it to contain 'not found'", got)
+	}
+}
+
+func TestBuildActivationCommand_PixiNotOnPath(t *testing.T) {
+	// nebi is available and workspace exists, but pixi is not on PATH
+	tmpDir := t.TempDir()
+	workspacePath := filepath.Join(tmpDir, "workspaces", "data-science")
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspacePath, "pixi.toml"), []byte("[project]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workspaces := []Workspace{
+		{Name: "data-science", Path: workspacePath, Missing: false},
+	}
+	wsJSON, _ := json.Marshal(workspaces)
+
+	nebiBin := filepath.Join(tmpDir, "nebi")
+	script := "#!/bin/sh\necho '" + string(wsJSON) + "'\n"
+	if err := os.WriteFile(nebiBin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Intentionally do NOT create a fake pixi binary
+
+	// Set PATH to only tmpDir so nebi is found but pixi is not
+	t.Setenv("PATH", tmpDir)
+
+	mgr := NewManager(newTestLogger())
+	_, err := mgr.BuildActivationCommand("alice/data-science", []string{"python", "app.py"})
+	if err == nil {
+		t.Fatal("BuildActivationCommand() error = nil, want error about pixi not found")
+	}
+	if got := err.Error(); !strings.Contains(got, "pixi not found in PATH") {
+		t.Errorf("error = %q, want it to contain 'pixi not found in PATH'", got)
 	}
 }
 
@@ -504,7 +555,7 @@ func TestValidateEnvironment_MissingPath(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidateEnvironment() error = nil, want error about missing path")
 	}
-	if got := err.Error(); !contains(got, "workspace path does not exist") {
+	if got := err.Error(); !strings.Contains(got, "workspace path does not exist") {
 		t.Errorf("error = %q, want it to contain 'workspace path does not exist'", got)
 	}
 }
@@ -536,7 +587,7 @@ func TestValidateEnvironment_NoManifest(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidateEnvironment() error = nil, want error about missing manifest")
 	}
-	if got := err.Error(); !contains(got, "no manifest file") {
+	if got := err.Error(); !strings.Contains(got, "no manifest file") {
 		t.Errorf("error = %q, want it to contain 'no manifest file'", got)
 	}
 }
@@ -568,7 +619,7 @@ func TestValidateEnvironment_PathIsFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidateEnvironment() error = nil, want error about not being a directory")
 	}
-	if got := err.Error(); !contains(got, "not a directory") {
+	if got := err.Error(); !strings.Contains(got, "not a directory") {
 		t.Errorf("error = %q, want it to contain 'not a directory'", got)
 	}
 }
@@ -604,16 +655,3 @@ func TestValidateEnvironment_WithPyprojectToml(t *testing.T) {
 	}
 }
 
-// contains is a helper to check substring presence
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && containsSubstr(s, substr)
-}
-
-func containsSubstr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
