@@ -123,44 +123,9 @@ func (m *Manager) FindWorkspacePath(envName string) (string, error) {
 	return "", fmt.Errorf("workspace %q not found in nebi workspace list (available: %s)", workspaceName, strings.Join(available, ", "))
 }
 
-// PullWorkspace runs 'nebi pull <workspace-name>' to sync the workspace from
-// the remote nebi server.  The pod must already have the nebi binary,
-// NEBI_REMOTE_URL, and NEBI_AUTH_TOKEN set.  Non-fatal: if pull fails the
-// workspace may still exist locally from a previous sync.
-func (m *Manager) PullWorkspace(envName string) {
-	workspaceName := envName
-	if idx := strings.LastIndex(envName, "/"); idx >= 0 {
-		workspaceName = envName[idx+1:]
-	}
-
-	nebiPath, err := exec.LookPath("nebi")
-	if err != nil {
-		m.logger.Warn("nebi not found, skipping workspace pull",
-			"env_name", envName, "error", err.Error())
-		return
-	}
-
-	m.logger.Info("pulling workspace from remote nebi server",
-		"env_name", envName, "workspace_name", workspaceName)
-
-	cmd := exec.Command(nebiPath, "pull", workspaceName, "--force")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		m.logger.Error("nebi pull failed", err,
-			"env_name", envName,
-			"workspace_name", workspaceName,
-			"output", string(output))
-	} else {
-		m.logger.Info("workspace pulled successfully",
-			"env_name", envName,
-			"workspace_name", workspaceName)
-	}
-}
-
 // BuildActivationCommand creates a command that runs within a pixi environment.
-// It pulls the workspace from the remote server, finds the local path, locates
-// the manifest file (pixi.toml or pyproject.toml), and wraps the command with
-// 'pixi run'.
+// It finds the workspace path, locates the manifest file (pixi.toml or
+// pyproject.toml), and wraps the command with 'pixi run'.
 func (m *Manager) BuildActivationCommand(envName string, command []string) ([]string, error) {
 	if envName == "" {
 		return command, nil
@@ -171,9 +136,6 @@ func (m *Manager) BuildActivationCommand(envName string, command []string) ([]st
 			"env_name", envName)
 		return nil, fmt.Errorf("empty command provided for pixi activation")
 	}
-
-	// Pull the workspace from the remote nebi server before looking it up
-	m.PullWorkspace(envName)
 
 	// Find the workspace path via nebi
 	workspacePath, err := m.FindWorkspacePath(envName)
