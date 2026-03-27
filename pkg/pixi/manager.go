@@ -18,9 +18,10 @@ const defaultPixiEnv = "default"
 
 // Workspace represents a single entry from 'nebi workspace list --json'
 type Workspace struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	Missing bool   `json:"missing"`
+	Name       string `json:"name"`
+	OriginName string `json:"origin_name,omitempty"`
+	Path       string `json:"path"`
+	Missing    bool   `json:"missing"`
 }
 
 // Manager handles pixi/nebi environment operations
@@ -93,19 +94,30 @@ func (m *Manager) FindWorkspacePath(envName string) (string, error) {
 		return "", fmt.Errorf("no workspaces found (nebi returned empty list)")
 	}
 
-	// Search for matching workspace
+	// Search for matching workspace by name or origin_name (server workspace name).
+	// The local name (from pixi.toml [workspace] name) can differ from the server
+	// workspace name, so we check both.
 	for _, ws := range workspaces {
-		if ws.Name == workspaceName {
+		if ws.Name == workspaceName || ws.OriginName == workspaceName {
 			if ws.Missing {
 				m.logger.Warn("workspace found but marked as missing",
 					"env_name", envName,
 					"workspace_name", workspaceName,
+					"local_name", ws.Name,
+					"origin_name", ws.OriginName,
 					"workspace_path", ws.Path)
 				return "", fmt.Errorf("workspace %q found but marked as missing at path %s", workspaceName, ws.Path)
+			}
+			matchedBy := "name"
+			if ws.Name != workspaceName {
+				matchedBy = "origin_name"
 			}
 			m.logger.Info("workspace found",
 				"env_name", envName,
 				"workspace_name", workspaceName,
+				"local_name", ws.Name,
+				"origin_name", ws.OriginName,
+				"matched_by", matchedBy,
 				"workspace_path", ws.Path)
 			return ws.Path, nil
 		}
