@@ -4,6 +4,7 @@ const progressContainer = document.getElementById('progressContainer');
 const commandText = document.getElementById('commandText');
 const versionText = document.getElementById('versionText');
 const logo = document.getElementById('logo');
+const logoLink = document.getElementById('logo-href');
 const autoScrollToggle = document.getElementById('autoScrollToggle');
 const elapsedTime = document.getElementById('elapsedTime');
 
@@ -37,12 +38,34 @@ autoScrollToggle.addEventListener('click', function() {
 // Load logo
 async function loadLogo() {
     try {
-        logo.src = basePath + '/static/logo.png';
+        logo.src = logoSrc;
         logo.style.display = 'block'; // Show logo
+        logoLink.href = `${jHubBaseUrl}/home`;
         logoLoaded = true;
         return true;
     } catch (err) {
         console.error('Failed to load logo:', err);
+    }
+    return false;
+}
+
+// Add navbar
+async function addNavbar() {
+    try {
+        const usernameElement = document.getElementById('username');
+        if (usernameElement) {
+            usernameElement.innerHTML = `<span class="username">${username}</span>`
+        }
+        
+        for (let e of document.getElementsByClassName("dropdown-item")) {
+            if (e.innerHTML === "Tokens") {
+                e.href = `${jHubBaseUrl}/token`
+            } else if (e.innerHTML === "Logout") {
+                e.href = `${jHubBaseUrl}/logout`
+            }
+        }
+    } catch (err) {
+        console.error('Failed to load navbar:', err);
     }
     return false;
 }
@@ -323,6 +346,7 @@ document.getElementById('copyLogs').addEventListener('click', function() {
 
 // Initial calls
 loadLogo();
+addNavbar();
 checkAppStatus();
 loadAllLogs().then(() => {
     setInterval(fetchRecentLogs, 1000);

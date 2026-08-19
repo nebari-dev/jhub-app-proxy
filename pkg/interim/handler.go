@@ -13,6 +13,8 @@ package interim
 import (
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -79,6 +81,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// e.g., "/user/alice/custom/_temp/jhub-app-proxy"
 	basePath := h.interimBasePath
 
+	// Get JupyterHub user and base url from env vars
+	username := os.Getenv("JUPYTERHUB_USER")
+	jhubBaseUrl := "/hub"
+	baseUrl, err := url.Parse(os.Getenv("JUPYTERHUB_API_URL"))
+	if err != nil {
+		h.logger.Error("failed to parse JUPYTERHUB_API_URL to get hub base url, using default base url /hub", err)
+	} else {
+		jhubBaseUrl, _ = strings.CutSuffix(baseUrl.Path, "/api")
+	}
+
+	// Get custom logo base64 string from JHUB_APP_PROXY_LOGO env var
+	logo := os.Getenv("JHUB_APP_PROXY_LOGO")
+
 	h.logger.Info("serving interim page",
 		"request_path", r.URL.Path,
 		"base_path", basePath,
@@ -89,8 +104,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Inject both the app URL and base path into the HTML via meta tags that JavaScript can read
 	html := strings.Replace(ui.LogsHTML, "<title>",
-		fmt.Sprintf("<meta name=\"app-redirect-url\" content=\"%s\">\n    <meta name=\"base-path\" content=\"%s\">\n    <title>",
-			h.appURLPath, basePath), 1)
+		fmt.Sprintf("<meta name=\"app-redirect-url\" content=\"%s\">\n    <meta name=\"base-path\" content=\"%s\">\n    <meta name=\"username\" content=\"%s\">\n    <meta name=\"jhub-base-url\" content=\"%s\">\n    <meta name=\"custom-logo\" content=\"%s\">\n    <title>",
+			h.appURLPath, basePath, username, jhubBaseUrl, logo), 1)
 	fmt.Fprint(w, html)
 }
 

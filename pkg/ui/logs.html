@@ -7,24 +7,55 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script>
         // Get the base path from meta tag (injected by server) and set it globally
         const basePathMeta = document.querySelector('meta[name="base-path"]');
         const basePathContent = basePathMeta ? basePathMeta.getAttribute('content') : '';
         // Use content from meta tag, but fallback to default if empty
-        window.basePath = basePathContent || '/_temp/jhub-app-proxy';
+        window.basePath = basePathContent || '/home/paipuri/Documents/tests/jupyterhub/spawner_form/jhub-app-proxy/pkg/ui';
 
         // Inject CSS dynamically
         const link = document.createElement('link');
         link.rel = 'stylesheet';
         link.href = window.basePath + '/static/logs.css';
         document.head.appendChild(link);
+
+        // Get username, custom logo and base url
+        const usernameMeta = document.querySelector('meta[name="username"]');
+        window.username = usernameMeta ? usernameMeta.getAttribute('content') : '';
+        const customLogoMeta = document.querySelector('meta[name="custom-logo"]');
+        customLogoContent = customLogoMeta ? customLogoMeta.getAttribute('content') : '';
+        window.logoSrc = customLogoContent ? customLogoContent : window.basePath + '/static/logo.png';
+        const jHubBaseUrlMeta = document.querySelector('meta[name="jhub-base-url"]');
+        window.jHubBaseUrl = jHubBaseUrlMeta ? jHubBaseUrlMeta.getAttribute('content') : '/hub';
     </script>
 </head>
 <body>
+    <nav class="navbar navbar-expand-sm bg-body-tertiary mb-4">
+        <div class="container-fluid">
+            <div class="navbar-header">
+                <span id="jupyterhub-logo" class="pull-left">
+                    <!-- ignore: H006 since we inherit from Hub -->
+                    <a id="logo-href" href="#"><img id="logo" alt="Nebari Logo" class="logo" style="display: none;"></a>
+                </span>
+            </div>
+
+            <div class="collapse navbar-collapse" id="thenavbar">
+                <div class="navbar-nav ms-auto mb-2">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" id="username" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"></a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="#">Logout</a></li>
+                        </ul>
+                    </li>
+                </div>
+            </div>
+        </div>
+    </nav>
     <div class="container fade-in">
         <div class="header">
-            <img id="logo" alt="Nebari Logo" class="logo" style="display: none;">
             <div>
                 <h1 class="title" id="title">Deploying your application</h1>
             </div>

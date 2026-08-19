@@ -9,10 +9,9 @@ body {
     background: #FAFBFC;
     color: #1e293b;
     min-height: 100vh;
-    display: flex;
     align-items: center;
     justify-content: center;
-    padding: 2rem 1rem 1rem 1rem;
+    padding: 0rem 1rem 1rem 1rem;
 }
 
 .container {
@@ -29,10 +28,11 @@ body {
     flex-direction: column;
     align-items: center;
     gap: 1rem;
+    margin-top: 6rem;
 }
 
 .logo {
-    width: 120px;
+    width: 28px;
     height: auto;
     margin-bottom: 0.5rem;
 }
@@ -281,4 +281,9 @@ body {
     .logs-content {
         height: 18rem;
     }
+}
+
+.username {
+    font-weight: bold;
+    font-size: 13px;
 }
