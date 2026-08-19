@@ -89,6 +89,11 @@ jhub-app-proxy --port 8000 --destport 8050 --authtype none --log-format pretty \
   -- python app.py
 ```
 
+It is possible to override the default logo in the logs page using `JHUB_APP_PROXY_LOGO`
+environment variable. It must a valid input to `src` attribute of `img` tag in HTML. It
+can be a URL like `https://example.com/logo.svg` or base64 encoding like
+`data:image/jpeg;base64,iVBORw0KGgo...`.
+
 **Note:** For local testing, use `--authtype none` and `--log-format pretty` for readable logs. In JupyterHub deployments, use `--authtype oauth` (default) which requires `JUPYTERHUB_API_URL` and related environment variables to be set.
 
 ## How It Works
